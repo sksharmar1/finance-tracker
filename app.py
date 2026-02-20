@@ -3,9 +3,8 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import Config
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,7 +49,7 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     expenses = db.relationship('Expense', backref='user', lazy=True)
 
@@ -61,7 +60,7 @@ class Expense(db.Model):
     amount = db.Column(db.Float, nullable=False)
     description = db.Column(db.String(255))
     category = db.Column(db.String(50))
-    date = db.Column(db.DateTime, default=datetime.utcnow)
+    date = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
 
@@ -108,8 +107,7 @@ def login():
 @app.route('/expenses', methods=['GET'])
 @jwt_required()
 def get_expenses():
-    print("Authorization header received:", request.headers.get('Authorization'))  # ← ADD THIS
-    user_id = get_jwt_identity()
+    print("Authorization header received:", request.headers.get('Authorization'))
     user_id = int(get_jwt_identity())  # Convert back to int for DB queries
     expenses = Expense.query.filter_by(user_id=user_id).all()
     return jsonify([{
