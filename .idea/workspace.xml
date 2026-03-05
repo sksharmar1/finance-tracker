@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f26c2af0-3587-4c05-a623-78ad631efbdf" name="Changes" comment="Week 2, Updated UI and ML suggestions for categories." />
+    <list default="true" id="f26c2af0-3587-4c05-a623-78ad631efbdf" name="Changes" comment="Week 2, Updated UI and ML suggestions for categories.">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/frontend/src/pages/Dashboard.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/frontend/src/pages/Dashboard.tsx" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -63,13 +66,14 @@
     "RunOnceActivity.git.unshallow": "true",
     "SHELLCHECK.PATH": "/Users/sksharma/Library/Application Support/JetBrains/PyCharm2025.3/plugins/Shell Script/shellcheck",
     "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/sksharma/PycharmProjects/finance-tracker/pythonProject",
+    "last_opened_file_path": "/Users/sksharma/PycharmProjects/finance-tracker/pythonProject/frontend/src/pages",
     "run.code.analysis.last.selected.profile": "aDefault",
     "settings.editor.selected.configurable": "preferences.pluginManager"
   }
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/frontend/src/pages" />
       <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/frontend/src" />
     </key>
