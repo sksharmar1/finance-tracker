@@ -4,27 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f26c2af0-3587-4c05-a623-78ad631efbdf" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/ADD_TEST_DATA.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CHARTS_ACTION_PLAN.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CHARTS_DEBUGGING.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CHARTS_FIX_DEBUG.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CHARTS_ISSUE_SUMMARY.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/CONSOLE_DEBUG_GUIDE.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/DEBUG_CHARTS.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/GIT_SETUP.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/add_test_data.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/add_test_data.sh" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/diagnose.sh" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/frontend/src/pages/Dashboard.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/frontend/src/pages/Login.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/frontend/src/pages/Register.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/frontend/src/utils/api.ts" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test-charts.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/routes.py" afterDir="false" />
-    </list>
+    <list default="true" id="f26c2af0-3587-4c05-a623-78ad631efbdf" name="Changes" comment="Week 2, Updated UI and ML suggestions for categories." />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -168,7 +148,20 @@
       <option name="presentableId" value="Default" />
       <updated>1771002826240</updated>
     </task>
+    <task id="LOCAL-00001" summary="Week 2, Updated UI and ML suggestions for categories.">
+      <option name="closed" value="true" />
+      <created>1772679470202</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1772679470202</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Week 2, Updated UI and ML suggestions for categories." />
+    <option name="LAST_COMMIT_MESSAGE" value="Week 2, Updated UI and ML suggestions for categories." />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
