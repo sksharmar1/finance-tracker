@@ -13,7 +13,7 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 # Enable CORS
-CORS(app)
+CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], supports_credentials=True)
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
