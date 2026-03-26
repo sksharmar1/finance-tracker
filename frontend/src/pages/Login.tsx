@@ -20,12 +20,14 @@ const Login: React.FC = () => {
         // Flask /login expects: username + password
         const res = await api.post('/login', { username, password });
         localStorage.setItem('token', res.data.access_token);
+        localStorage.setItem('username', username);
       } else {
         // Flask /register expects: username + email + password
         await api.post('/register', { username, email, password });
         // Auto-login after register
         const res = await api.post('/login', { username, password });
         localStorage.setItem('token', res.data.access_token);
+        localStorage.setItem('username', username);
       }
       navigate('/dashboard');
     } catch (err: any) {
