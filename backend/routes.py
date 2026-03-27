@@ -3,7 +3,7 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 from werkzeug.security import generate_password_hash, check_password_hash #add to pip if not already
 
 import app
-from models import db, User, Expense
+from models import db, User, Expense, Feedback
 from datetime import timedelta
 
 # User Registration
@@ -90,6 +90,26 @@ def delete_expense(id):
     db.session.delete(expense)
     db.session.commit()
     return jsonify({'msg': 'Expense deleted'}), 200
+
+# Save feedback on AI predictions
+@app.route('/feedback', methods=['POST'])
+@jwt_required()
+def save_feedback():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+
+    if not data or not data.get('description') or not data.get('predicted') or not data.get('actual'):
+        return jsonify({'msg': 'Missing required fields'}), 400
+
+    feedback = Feedback(
+        description=data.get('description'),
+        predicted=data.get('predicted'),
+        actual=data.get('actual'),
+        user_id=user_id
+    )
+    db.session.add(feedback)
+    db.session.commit()
+    return jsonify({'msg': 'Feedback saved successfully', 'id': feedback.id}), 201
 
 # Bonus starters: Update & Delete (implement similarly)
 # @app.route('/expenses/<int:id>', methods=['PUT'])

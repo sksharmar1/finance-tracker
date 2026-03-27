@@ -27,6 +27,53 @@ const CATEGORY_COLORS: Record<string, string> = {
   Other: '#6b7280',
 };
 
+const QUOTES = [
+  "Compound interest is the eighth wonder of the world",
+  "Don't save what is left after spending",
+  "An investment in knowledge pays the best interest",
+  "The stock market rewards the patient",
+  "It's not how much you make — it's how much you keep",
+  "Beware of little expenses",
+  "Financial freedom is built one habit at a time",
+  "Do not put all your eggs in one basket",
+  "A budget is telling your money where to go",
+  "Wealth is the ability to fully experience life",
+  "Cut your coat according to your cloth",
+  "Save first, spend what remains",
+];
+
+const QuoteBubbles: React.FC = () => {
+  const [bubbles, setBubbles] = React.useState<{ id: number; text: string; left: string; top: string; dur: number }[]>([]);
+  const counterRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const spawn = () => {
+      const id = counterRef.current++;
+      const text = QUOTES[id % QUOTES.length];
+      const left = `${5 + Math.random() * 82}%`;
+      const top  = `${8 + Math.random() * 78}%`;
+      const dur  = 4000 + Math.random() * 3000; // 4–7s visible
+      setBubbles(prev => [...prev, { id, text, left, top, dur }]);
+      setTimeout(() => setBubbles(prev => prev.filter(b => b.id !== id)), dur + 200);
+    };
+
+    spawn(); // first one immediately
+    const interval = setInterval(spawn, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="quote-field">
+      {bubbles.map(b => (
+        <div key={b.id} className="fquote"
+          style={{ left: b.left, top: b.top, animationDuration: `${b.dur}ms` }}>
+          {b.text}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const Dashboard: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [amount, setAmount] = useState('');
@@ -240,21 +287,16 @@ const Dashboard: React.FC = () => {
     const spendingSummary = `User has ${expenses.length} expenses totaling $${totalSpent.toFixed(2)}. Top categories: ${sortedCategories.slice(0, 3).map(c => `${c.name}: $${c.value.toFixed(2)}`).join(', ')}. This month: $${currentMonthSpend.toFixed(2)}.`;
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          system: `You are a helpful personal finance assistant. Be concise, friendly, and give practical advice. User spending context: ${spendingSummary} Keep responses under 120 words.`,
-          messages: newMessages.map(m => ({ role: m.role, content: m.content }))
-        })
+      const res = await api.post('/chat', {
+        messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+        context: spendingSummary
       });
-      const data = await response.json();
-      const reply = data.content?.find((b: any) => b.type === 'text')?.text || "Sorry, couldn't respond right now.";
+      const reply = res.data?.reply || "Sorry, couldn't respond right now.";
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
-    } catch {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Connection error. Please try again.' }]);
+    } catch (err: any) {
+      console.error('Chat error:', err?.response?.data || err?.message || err);
+      const msg = err?.response?.data?.msg || 'Something went wrong. Please try again.';
+      setChatMessages(prev => [...prev, { role: 'assistant', content: msg }]);
     } finally {
       setChatLoading(false);
     }
@@ -269,9 +311,50 @@ const Dashboard: React.FC = () => {
 
         .dash-root {
           font-family: 'Plus Jakarta Sans', sans-serif;
-          background: #f0f2f8;
+          background: #eef0f7;
           min-height: 100vh;
           color: #1e1e2e;
+          position: relative;
+          overflow-x: hidden;
+        }
+
+        .dash-root > * { position: relative; z-index: 1; }
+        .dash-root > .quote-field { z-index: 20; }
+
+        /* ── BUBBLE QUOTE FIELD — sits above cards ── */
+        .quote-field {
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: 20;
+          overflow: hidden;
+        }
+
+        .fquote {
+          position: absolute;
+          font-family: 'Plus Jakarta Sans', sans-serif;
+          font-size: 0.72rem;
+          font-weight: 600;
+          color: rgba(79,70,229,0.75);
+          background: rgba(255,255,255,0.88);
+          border: 1px solid rgba(99,102,241,0.22);
+          border-radius: 22px;
+          padding: 8px 16px;
+          box-shadow: 0 4px 18px rgba(99,102,241,0.1), 0 1px 4px rgba(0,0,0,0.05);
+          white-space: nowrap;
+          backdrop-filter: blur(6px);
+          animation: bubblePop cubic-bezier(0.34,1.28,0.64,1) forwards;
+          will-change: transform, opacity;
+          transform-origin: bottom center;
+        }
+
+        @keyframes bubblePop {
+          0%   { opacity: 0;   transform: translateY(20px) scale(0.75); }
+          15%  { opacity: 1;   transform: translateY(-4px) scale(1.04); }
+          25%  { opacity: 1;   transform: translateY(0px)  scale(1);    }
+          70%  { opacity: 1;   transform: translateY(-8px) scale(1);    }
+          88%  { opacity: 0.6; transform: translateY(-16px) scale(0.97); }
+          100% { opacity: 0;   transform: translateY(-28px) scale(0.92); }
         }
 
         /* ── HERO ── */
@@ -662,6 +745,9 @@ const Dashboard: React.FC = () => {
       `}</style>
 
       <div className="dash-root">
+
+        {/* ── BUBBLE FINANCIAL QUOTES ── */}
+        <QuoteBubbles />
         <div style={{ maxWidth: 1080, margin: '0 auto', padding: '28px 20px 110px' }}>
 
           {/* ── PAGE HEADER ── */}

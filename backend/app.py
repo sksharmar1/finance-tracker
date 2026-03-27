@@ -11,6 +11,7 @@ import os
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.naive_bayes import MultinomialNB
 import pickle
+import anthropic
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILE = os.path.join(BASE_DIR, 'category_model.pkl')
@@ -242,6 +243,40 @@ def save_feedback():
         db.session.rollback()
         print(f"Feedback error: {str(e)}")
         return jsonify({'msg': 'Server error'}), 500
+
+
+# ====================== CHAT ENDPOINT ======================
+@app.route('/chat', methods=['POST'])
+@jwt_required()
+def chat():
+    try:
+        data = request.get_json()
+        if not data or not data.get('messages'):
+            return jsonify({'msg': 'Missing messages'}), 400
+
+        messages = data.get('messages', [])
+        context  = data.get('context', '')
+
+        client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+        response = client.messages.create(
+            model='claude-opus-4-5',
+            max_tokens=1024,
+            system=f"You are a helpful personal finance assistant embedded in a finance tracking app. "
+                   f"Be concise, friendly, and give practical actionable advice. "
+                   f"User spending context: {context} "
+                   f"Keep responses under 120 words unless detail is genuinely needed.",
+            messages=messages
+        )
+
+        reply = response.content[0].text if response.content else "Sorry, I couldn't respond right now."
+        return jsonify({'reply': reply}), 200
+
+    except anthropic.AuthenticationError:
+        return jsonify({'msg': 'API key missing or invalid. Set ANTHROPIC_API_KEY in your .env file.'}), 500
+    except Exception as e:
+        print(f"Chat error: {str(e)}")
+        return jsonify({'msg': f'Chat error: {str(e)}'}), 500
 
 # ====================== CREATE TABLES ======================
 with app.app_context():

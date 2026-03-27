@@ -27,3 +27,27 @@ class Expense(db.Model):
 
     def __repr__(self):
         return f'<Expense {self.amount} in {self.category}>'
+
+class Feedback(db.Model):
+    __tablename__ = 'feedback'
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String(200), nullable=False)
+    predicted = db.Column(db.String(50), nullable=False)
+    actual = db.Column(db.String(50), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f'<Feedback {self.description}: {self.predicted} → {self.actual}>'
+
+class Feedback(db.Model):
+    __tablename__ = 'feedback'
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String(200), nullable=False)
+    predicted = db.Column(db.String(50), nullable=False)
+    actual = db.Column(db.String(50), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f'<Feedback {self.description}: {self.predicted} → {self.actual}>'
