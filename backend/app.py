@@ -278,6 +278,141 @@ def chat():
         print(f"Chat error: {str(e)}")
         return jsonify({'msg': f'Chat error: {str(e)}'}), 500
 
+
+# ====================== MONTHLY REPORT ENDPOINT ======================
+@app.route('/generate-report', methods=['POST'])
+@jwt_required()
+def generate_report():
+    try:
+        user_id = int(get_jwt_identity())
+
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'msg': 'User not found'}), 404
+
+        # Pull all expenses for this user
+        all_expenses = Expense.query.filter_by(user_id=user_id).all()
+        if not all_expenses:
+            return jsonify({'msg': 'No expenses found to generate a report'}), 400
+
+        now = datetime.utcnow()
+
+        # Filter to current month
+        target_expenses = [
+            e for e in all_expenses
+            if e.date.month == now.month and e.date.year == now.year
+        ]
+        report_label = now.strftime("%B %Y")
+
+        if not target_expenses:
+            return jsonify({'msg': f'No expenses found for {report_label}'}), 400
+
+        # ── Stats ──────────────────────────────────────
+        total = sum(e.amount for e in target_expenses)
+
+        category_totals = {}
+        for e in target_expenses:
+            category_totals[e.category] = category_totals.get(e.category, 0) + e.amount
+        top_categories = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
+
+        # Previous month
+        if now.month == 1:
+            prev_m, prev_y = 12, now.year - 1
+        else:
+            prev_m, prev_y = now.month - 1, now.year
+
+        prev_expenses = [
+            e for e in all_expenses
+            if e.date.month == prev_m and e.date.year == prev_y
+        ]
+        prev_total = sum(e.amount for e in prev_expenses)
+        mom_pct = ((total - prev_total) / prev_total * 100) if prev_total > 0 else None
+
+        # Avg daily spend
+        unique_days = len(set(e.date.day for e in target_expenses))
+        avg_daily = total / max(unique_days, 1)
+
+        # Top 3 individual expenses
+        top_expenses = sorted(target_expenses, key=lambda e: e.amount, reverse=True)[:3]
+
+        # ── Claude prompt ───────────────────────────────
+        cat_breakdown = "\n".join(
+            f"  - {cat}: ${amt:.2f} ({amt / total * 100:.1f}%)"
+            for cat, amt in top_categories
+        )
+        top_exp_text = "\n".join(
+            f"  - {e.description}: ${e.amount:.2f} ({e.category})"
+            for e in top_expenses
+        )
+        mom_text = (
+            f"{mom_pct:+.1f}% vs last month (${prev_total:.2f})"
+            if mom_pct is not None else "No previous month data available"
+        )
+
+        prompt = f"""You are a personal financial coach. Generate a clear, friendly, and insightful monthly financial report for {user.username}.
+
+SPENDING DATA FOR {report_label}:
+- Total spent: ${total:.2f}
+- Month-over-month: {mom_text}
+- Average daily spend: ${avg_daily:.2f}
+- Number of transactions: {len(target_expenses)}
+
+Category breakdown:
+{cat_breakdown}
+
+Top 3 largest expenses:
+{top_exp_text}
+
+Generate a report with EXACTLY these sections using these exact markdown headers:
+
+## Executive Summary
+2-3 sentences giving the overall picture of this month's spending in plain English.
+
+## Category Analysis
+For each category (highest to lowest), one sentence explaining what the spending suggests.
+
+## Key Insights
+3 bullet points of genuine, non-obvious insights derived from the data.
+
+## Recommendations
+3 specific, actionable recommendations tailored to this person's actual spending. Each should include an estimated monthly saving if followed.
+
+## Savings Projection
+If the user follows all 3 recommendations, what would they save monthly and annually? A short motivational paragraph with concrete numbers.
+
+Keep the tone warm, direct, and coach-like. Do not just restate numbers — focus on meaning and action."""
+
+        client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+        response = client.messages.create(
+            model='claude-opus-4-5',
+            max_tokens=1500,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        narrative = response.content[0].text if response.content else ''
+
+        return jsonify({
+            'report_label':    report_label,
+            'username':        user.username,
+            'total':           round(total, 2),
+            'prev_total':      round(prev_total, 2),
+            'mom_pct':         round(mom_pct, 1) if mom_pct is not None else None,
+            'avg_daily':       round(avg_daily, 2),
+            'tx_count':        len(target_expenses),
+            'category_totals': dict(top_categories),
+            'top_expenses':    [
+                {'description': e.description, 'amount': e.amount, 'category': e.category}
+                for e in top_expenses
+            ],
+            'narrative':       narrative,
+            'generated_at':    now.isoformat(),
+        }), 200
+
+    except anthropic.AuthenticationError:
+        return jsonify({'msg': 'API key missing or invalid. Set ANTHROPIC_API_KEY in your .env file.'}), 500
+    except Exception as e:
+        print(f"Report error: {str(e)}")
+        return jsonify({'msg': f'Report error: {str(e)}'}), 500
+
 # ====================== CREATE TABLES ======================
 with app.app_context():
     db.create_all()

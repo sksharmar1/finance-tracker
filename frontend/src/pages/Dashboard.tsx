@@ -87,8 +87,14 @@ const Dashboard: React.FC = () => {
   const [feedbackPredicted, setFeedbackPredicted] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses' | 'report'>('overview');
   const [username, setUsername] = useState('');
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
+
+  // Report state
+  const [reportLoading, setReportLoading] = useState(false);
+  const [report, setReport] = useState<any>(null);
+  const [reportError, setReportError] = useState('');
 
   // Chatbot state
   const [chatOpen, setChatOpen] = useState(false);
@@ -114,6 +120,10 @@ const Dashboard: React.FC = () => {
     } catch {}
     fetchExpenses();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('darkMode', String(darkMode));
+  }, [darkMode]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -276,6 +286,91 @@ const Dashboard: React.FC = () => {
     navigate('/');
   };
 
+  const generateReport = async () => {
+    if (expenses.length === 0) {
+      setReportError('Add some expenses first before generating a report.');
+      return;
+    }
+    setReportLoading(true);
+    setReportError('');
+    setReport(null);
+    try {
+      const res = await api.post('/generate-report', {});
+      setReport(res.data);
+    } catch (err: any) {
+      setReportError(err?.response?.data?.msg || 'Failed to generate report. Please try again.');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const downloadReportPDF = () => {
+    if (!report) return;
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Financial Report - ${report.report_label}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background: #fff; color: #1e1e2e; padding: 48px; max-width: 800px; margin: 0 auto; }
+    .cover { text-align: center; padding: 60px 0 40px; border-bottom: 2px solid #6366f1; margin-bottom: 40px; }
+    .cover h1 { font-size: 2rem; font-weight: 800; color: #1e1e2e; }
+    .cover p { color: #64748b; margin-top: 8px; }
+    .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 36px; }
+    .stat { background: #f8f9fc; border-radius: 12px; padding: 16px; text-align: center; }
+    .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #94a3b8; font-weight: 600; margin-bottom: 6px; }
+    .stat-val { font-size: 1.5rem; font-weight: 800; color: #6366f1; }
+    .cats { margin-bottom: 36px; }
+    .cat-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .cat-bar-bg { flex: 1; height: 6px; background: #e8eaf2; border-radius: 4px; margin: 0 12px; overflow: hidden; }
+    .cat-bar-fill { height: 100%; background: linear-gradient(90deg,#6366f1,#8b5cf6); border-radius: 4px; }
+    .narrative h2 { font-size: 1.1rem; font-weight: 700; color: #6366f1; margin: 28px 0 10px; }
+    .narrative p { line-height: 1.7; color: #334155; font-size: 0.9rem; }
+    .narrative ul { padding-left: 20px; margin-top: 8px; }
+    .narrative ul li { line-height: 1.7; color: #334155; font-size: 0.9rem; margin-bottom: 4px; }
+    .footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid #e8eaf2; text-align: center; color: #94a3b8; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="cover">
+    <h1>💰 Financial Report</h1>
+    <p>${report.report_label} &nbsp;·&nbsp; ${report.username}</p>
+    <p style="margin-top:4px;font-size:0.8rem;color:#94a3b8;">Generated ${new Date(report.generated_at).toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-label">Total Spent</div><div class="stat-val">$${report.total.toFixed(2)}</div></div>
+    <div class="stat"><div class="stat-label">vs Last Month</div><div class="stat-val" style="color:${report.mom_pct > 0 ? '#ef4444' : '#10b981'}">${report.mom_pct !== null ? (report.mom_pct > 0 ? '+' : '') + report.mom_pct + '%' : 'N/A'}</div></div>
+    <div class="stat"><div class="stat-label">Avg Daily</div><div class="stat-val">$${report.avg_daily.toFixed(2)}</div></div>
+  </div>
+  <div class="cats">
+    ${Object.entries(report.category_totals as Record<string,number>).map(([cat, amt]) => {
+      const pct = Math.round((amt as number / report.total) * 100);
+      return `<div class="cat-row"><span style="width:110px;font-size:0.85rem;font-weight:600">${cat}</span><div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${pct}%"></div></div><span style="font-size:0.85rem;font-weight:700;color:#6366f1">$${(amt as number).toFixed(2)}</span></div>`;
+    }).join('')}
+  </div>
+  <div class="narrative">
+    ${report.narrative
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^\- (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>\n?)+/gs, (m: string) => '<ul>' + m + '</ul>')
+      .split('\n').map((l: string) => l.trim() && !l.startsWith('<') ? '<p>' + l + '</p>' : l).join('\n')
+    }
+  </div>
+  <div class="footer">FinanceAI &nbsp;·&nbsp; AI-Powered Financial Report &nbsp;·&nbsp; Confidential</div>
+</body>
+</html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `FinanceReport_${report.report_label.replace(' ','_')}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Report downloaded!', 'success');
+  };
+
   const sendChatMessage = async () => {
     if (!chatInput.trim() || chatLoading) return;
     const userMsg = chatInput.trim();
@@ -309,19 +404,78 @@ const Dashboard: React.FC = () => {
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+        /* ── CSS VARIABLES: light / dark ── */
         .dash-root {
+          --bg:           #eef0f7;
+          --bg2:          #e4e6f0;
+          --card-bg:      #ffffff;
+          --card-border:  #e8eaf2;
+          --text:         #1e1e2e;
+          --text2:        #64748b;
+          --text3:        #94a3b8;
+          --inp-bg:       #f8f9fc;
+          --inp-border:   #e2e6f0;
+          --tab-bg:       #e8eaf2;
+          --tab-on:       #ffffff;
+          --stat-bg:      #f8f9fc;
+          --stat-border:  #e8eaf2;
+          --recent-bg:    #f8f9fc;
+          --recent-border:#f0f2f8;
+          --recent-hover: #eef2ff;
+          --table-border: #f1f3f9;
+          --table-hover:  #fafbff;
+          --chat-bg:      #ffffff;
+          --chat-msg-bg:  #fafbff;
+          --chat-border:  #e2e8f0;
+          --ai-bg:        #ffffff;
+          --ai-border:    #c7d2fe;
+          --scrollbar:    #e2e8f0;
+          --fquote-bg:    rgba(255,255,255,0.88);
+          --fquote-color: rgba(79,70,229,0.75);
+          --fquote-border:rgba(99,102,241,0.22);
           font-family: 'Plus Jakarta Sans', sans-serif;
-          background: #eef0f7;
+          background: var(--bg);
           min-height: 100vh;
-          color: #1e1e2e;
+          color: var(--text);
           position: relative;
           overflow-x: hidden;
+          transition: background 0.3s, color 0.3s;
+        }
+
+        .dash-root.dark {
+          --bg:           #0f1117;
+          --bg2:          #161b27;
+          --card-bg:      #1a1f2e;
+          --card-border:  #2a3045;
+          --text:         #e8eaf6;
+          --text2:        #8892b0;
+          --text3:        #4a5568;
+          --inp-bg:       #141824;
+          --inp-border:   #2a3045;
+          --tab-bg:       #141824;
+          --tab-on:       #1e2435;
+          --stat-bg:      #141824;
+          --stat-border:  #2a3045;
+          --recent-bg:    #141824;
+          --recent-border:#2a3045;
+          --recent-hover: #1e2a45;
+          --table-border: #1e2435;
+          --table-hover:  #1a2035;
+          --chat-bg:      #1a1f2e;
+          --chat-msg-bg:  #141824;
+          --chat-border:  #2a3045;
+          --ai-bg:        #1a1f2e;
+          --ai-border:    #3730a3;
+          --scrollbar:    #2a3045;
+          --fquote-bg:    rgba(26,31,46,0.92);
+          --fquote-color: rgba(165,180,252,0.9);
+          --fquote-border:rgba(99,102,241,0.35);
         }
 
         .dash-root > * { position: relative; z-index: 1; }
         .dash-root > .quote-field { z-index: 20; }
 
-        /* ── BUBBLE QUOTE FIELD — sits above cards ── */
+        /* ── BUBBLE QUOTE FIELD ── */
         .quote-field {
           position: fixed;
           inset: 0;
@@ -335,9 +489,9 @@ const Dashboard: React.FC = () => {
           font-family: 'Plus Jakarta Sans', sans-serif;
           font-size: 0.72rem;
           font-weight: 600;
-          color: rgba(79,70,229,0.75);
-          background: rgba(255,255,255,0.88);
-          border: 1px solid rgba(99,102,241,0.22);
+          color: var(--fquote-color);
+          background: var(--fquote-bg);
+          border: 1px solid var(--fquote-border);
           border-radius: 22px;
           padding: 8px 16px;
           box-shadow: 0 4px 18px rgba(99,102,241,0.1), 0 1px 4px rgba(0,0,0,0.05);
@@ -357,7 +511,7 @@ const Dashboard: React.FC = () => {
           100% { opacity: 0;   transform: translateY(-28px) scale(0.92); }
         }
 
-        /* ── HERO ── */
+        /* ── HERO (unchanged — always dark) ── */
         .hero {
           position: relative;
           overflow: hidden;
@@ -367,7 +521,6 @@ const Dashboard: React.FC = () => {
           margin-bottom: 24px;
         }
 
-        /* subtle noise texture overlay */
         .hero::after {
           content: '';
           position: absolute;
@@ -389,18 +542,12 @@ const Dashboard: React.FC = () => {
         }
 
         .dollar-bubble {
-          position: absolute;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: 'Outfit', sans-serif;
-          font-weight: 700;
-          color: rgba(255,255,255,0.07);
-          border: 1px solid rgba(255,255,255,0.06);
+          position: absolute; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-family: 'Outfit', sans-serif; font-weight: 700;
+          color: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.06);
           background: rgba(255,255,255,0.03);
-          pointer-events: none;
-          user-select: none;
+          pointer-events: none; user-select: none;
           animation: floatBubble ease-in-out infinite;
         }
 
@@ -410,341 +557,130 @@ const Dashboard: React.FC = () => {
         }
 
         .hero-content { position: relative; z-index: 1; }
-
-        .hero-label {
-          font-family: 'Plus Jakarta Sans', sans-serif;
-          font-size: 0.75rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.14em;
-          color: rgba(255,255,255,0.45);
-          margin-bottom: 10px;
-        }
-
-        .total-amount {
-          font-family: 'Outfit', sans-serif;
-          font-weight: 800;
-          font-size: clamp(3.2rem, 6vw, 5rem);
-          color: #ffffff;
-          letter-spacing: -0.02em;
-          line-height: 1;
-          margin-bottom: 32px;
-          text-shadow: 0 2px 40px rgba(139,92,246,0.4);
-        }
-
-        .total-amount .dollar-sign {
-          font-size: 0.6em;
-          vertical-align: super;
-          opacity: 0.7;
-          margin-right: 2px;
-        }
-
-        .hero-stats { display: flex; gap: 40px; flex-wrap: wrap; }
-
-        .hero-stat-label {
-          font-size: 0.72rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-          color: rgba(255,255,255,0.38);
-          margin-bottom: 5px;
-        }
-
-        .hero-stat-val {
-          font-family: 'Outfit', sans-serif;
-          font-weight: 700;
-          font-size: 1.35rem;
-          color: rgba(255,255,255,0.92);
-          letter-spacing: -0.01em;
-        }
-
+        .hero-label { font-family:'Plus Jakarta Sans',sans-serif; font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.14em; color:rgba(255,255,255,0.45); margin-bottom:10px; }
+        .total-amount { font-family:'Outfit',sans-serif; font-weight:800; font-size:clamp(3.2rem,6vw,5rem); color:#fff; letter-spacing:-0.02em; line-height:1; margin-bottom:32px; text-shadow:0 2px 40px rgba(139,92,246,0.4); }
+        .total-amount .dollar-sign { font-size:0.6em; vertical-align:super; opacity:0.7; margin-right:2px; }
+        .hero-stats { display:flex; gap:40px; flex-wrap:wrap; }
+        .hero-stat-label { font-size:0.72rem; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:rgba(255,255,255,0.38); margin-bottom:5px; }
+        .hero-stat-val { font-family:'Outfit',sans-serif; font-weight:700; font-size:1.35rem; color:rgba(255,255,255,0.92); letter-spacing:-0.01em; }
         .hero-stat-val.up   { color: #fca5a5; }
         .hero-stat-val.down { color: #6ee7b7; }
         .hero-stat-val.neu  { color: rgba(255,255,255,0.85); }
 
         /* ── HEADER ── */
-        .page-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 28px;
-        }
+        .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:28px; }
+        .brand-name { font-family:'Outfit',sans-serif; font-weight:800; font-size:1.55rem; color:var(--text); letter-spacing:-0.02em; transition:color 0.3s; }
+        .brand-sub { font-size:0.76rem; color:var(--text3); margin-top:2px; font-weight:400; transition:color 0.3s; }
 
-        .brand-name {
-          font-family: 'Outfit', sans-serif;
-          font-weight: 800;
-          font-size: 1.55rem;
-          color: #1e1e2e;
-          letter-spacing: -0.02em;
-        }
-
-        .brand-sub {
-          font-size: 0.76rem;
-          color: #94a3b8;
-          margin-top: 2px;
-          font-weight: 400;
-        }
-
-        /* ── TABS ── */
-        .tab-bar { display: flex; gap: 4px; margin-bottom: 20px; background: #e8eaf2; padding: 4px; border-radius: 14px; width: fit-content; }
-
-        .tab-btn {
-          padding: 8px 20px;
-          border-radius: 10px;
-          font-size: 0.84rem;
-          font-weight: 600;
-          cursor: pointer;
-          border: none;
-          background: transparent;
-          color: #64748b;
-          font-family: 'Plus Jakarta Sans', sans-serif;
-          transition: all 0.18s;
-        }
-
-        .tab-btn.on {
-          background: #ffffff;
-          color: #1e1e2e;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        .tab-btn:hover:not(.on) { color: #475569; background: rgba(255,255,255,0.5); }
-
-        /* ── CARDS ── */
-        .card {
-          background: #ffffff;
-          border: 1px solid #e8eaf2;
-          border-radius: 20px;
-          padding: 28px;
-          box-shadow: 0 1px 4px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.03);
-        }
-
-        .card-title {
-          font-family: 'Plus Jakarta Sans', sans-serif;
-          font-size: 0.78rem;
-          font-weight: 700;
-          color: #94a3b8;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-          margin-bottom: 20px;
-        }
-
-        /* ── INPUTS ── */
-        .inp {
-          background: #f8f9fc;
-          border: 1.5px solid #e2e6f0;
-          color: #1e1e2e;
-          border-radius: 14px;
-          padding: 13px 16px;
-          font-size: 0.9rem;
-          width: 100%;
-          outline: none;
-          transition: border-color 0.18s, box-shadow 0.18s;
-          font-family: 'Plus Jakarta Sans', sans-serif;
-        }
-        .inp::placeholder { color: #b0b8cc; }
-        .inp:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); background: #fff; }
-
-        .sel {
-          background: #f8f9fc;
-          border: 1.5px solid #e2e6f0;
-          color: #1e1e2e;
-          border-radius: 14px;
-          padding: 13px 16px;
-          font-size: 0.9rem;
-          width: 100%;
-          outline: none;
-          cursor: pointer;
-          font-family: 'Plus Jakarta Sans', sans-serif;
-          font-weight: 500;
-          appearance: none;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2394a3b8' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
-          background-repeat: no-repeat;
-          background-position: right 14px center;
-          padding-right: 38px;
-          transition: border-color 0.18s, box-shadow 0.18s;
-        }
-        .sel:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); background-color: #fff; outline: none; }
-        .sel option { background: #fff; color: #1e1e2e; }
-
-        /* ── BUTTONS ── */
-        .btn-primary {
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          color: #fff;
-          font-weight: 700;
-          padding: 13px 24px;
-          border-radius: 14px;
-          border: none;
-          cursor: pointer;
-          font-family: 'Plus Jakarta Sans', sans-serif;
-          font-size: 0.9rem;
-          white-space: nowrap;
-          transition: opacity 0.18s, transform 0.12s, box-shadow 0.18s;
-          box-shadow: 0 4px 14px rgba(99,102,241,0.35);
-        }
-        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(99,102,241,0.45); }
-        .btn-primary:active { transform: translateY(0); }
-
-        .btn-outline {
-          background: transparent;
-          color: #6366f1;
-          padding: 9px 18px;
-          border-radius: 12px;
-          border: 1.5px solid #c7d2fe;
-          cursor: pointer;
-          font-family: 'Plus Jakarta Sans', sans-serif;
-          font-size: 0.82rem;
-          font-weight: 600;
-          transition: all 0.18s;
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-        }
-        .btn-outline:hover { background: #eef2ff; border-color: #6366f1; }
-
-        .btn-ghost-red {
-          background: #fff0f0;
-          color: #ef4444;
-          border: 1.5px solid #fecaca;
-          padding: 9px 18px;
+        /* ── DARK MODE TOGGLE ── */
+        .dm-toggle {
+          width: 44px; height: 24px;
+          background: var(--inp-bg);
+          border: 1.5px solid var(--inp-border);
           border-radius: 12px;
           cursor: pointer;
-          font-family: 'Plus Jakarta Sans', sans-serif;
-          font-size: 0.82rem;
-          font-weight: 600;
-          transition: all 0.18s;
-        }
-        .btn-ghost-red:hover { background: #fee2e2; }
-
-        /* ── AI SUGGESTION PILL ── */
-        .ai-suggestion {
-          position: absolute;
-          left: 0; right: 0;
-          top: calc(100% + 6px);
-          z-index: 20;
-          padding: 10px 12px;
-          background: #fff;
-          border: 1.5px solid #c7d2fe;
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          box-shadow: 0 6px 20px rgba(99,102,241,0.14);
-        }
-
-        .ai-pulse {
-          width: 8px; height: 8px; border-radius: 50%;
-          background: #6366f1;
-          animation: pulse 1.2s ease-in-out infinite;
+          position: relative;
+          transition: background 0.25s, border-color 0.25s;
           flex-shrink: 0;
         }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(0.85); }
+        .dm-toggle.on { background: #6366f1; border-color: #6366f1; }
+        .dm-toggle::after {
+          content: '';
+          position: absolute;
+          top: 2px; left: 2px;
+          width: 16px; height: 16px;
+          border-radius: 50%;
+          background: #fff;
+          transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
         }
+        .dm-toggle.on::after { transform: translateX(20px); }
+
+        /* ── TABS ── */
+        .tab-bar { display:flex; gap:4px; margin-bottom:20px; background:var(--tab-bg); padding:4px; border-radius:14px; width:fit-content; transition:background 0.3s; }
+        .tab-btn { padding:8px 20px; border-radius:10px; font-size:0.84rem; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--text2); font-family:'Plus Jakarta Sans',sans-serif; transition:all 0.18s; }
+        .tab-btn.on { background:var(--tab-on); color:var(--text); box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+        .tab-btn:hover:not(.on) { color:var(--text); background:rgba(255,255,255,0.08); }
+
+        /* ── CARDS ── */
+        .card { background:var(--card-bg); border:1px solid var(--card-border); border-radius:20px; padding:28px; box-shadow:0 1px 4px rgba(0,0,0,0.04),0 4px 16px rgba(0,0,0,0.03); transition:background 0.3s,border-color 0.3s; }
+        .card-title { font-family:'Plus Jakarta Sans',sans-serif; font-size:0.78rem; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:20px; }
+
+        /* ── INPUTS ── */
+        .inp { background:var(--inp-bg); border:1.5px solid var(--inp-border); color:var(--text); border-radius:14px; padding:13px 16px; font-size:0.9rem; width:100%; outline:none; transition:border-color 0.18s,box-shadow 0.18s,background 0.3s; font-family:'Plus Jakarta Sans',sans-serif; }
+        .inp::placeholder { color:var(--text3); }
+        .inp:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,0.12); background:var(--card-bg); }
+
+        .sel { background:var(--inp-bg); border:1.5px solid var(--inp-border); color:var(--text); border-radius:14px; padding:13px 16px; font-size:0.9rem; width:100%; outline:none; cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif; font-weight:500; appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2394a3b8' d='M6 8L0 0h12z'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 14px center; padding-right:38px; transition:border-color 0.18s,box-shadow 0.18s,background 0.3s; }
+        .sel:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,0.12); background-color:var(--card-bg); outline:none; }
+        .sel option { background:var(--card-bg); color:var(--text); }
+
+        /* ── BUTTONS ── */
+        .btn-primary { background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; font-weight:700; padding:13px 24px; border-radius:14px; border:none; cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif; font-size:0.9rem; white-space:nowrap; transition:opacity 0.18s,transform 0.12s,box-shadow 0.18s; box-shadow:0 4px 14px rgba(99,102,241,0.35); }
+        .btn-primary:hover { opacity:0.9; transform:translateY(-1px); box-shadow:0 6px 18px rgba(99,102,241,0.45); }
+        .btn-primary:active { transform:translateY(0); }
+
+        .btn-outline { background:transparent; color:#6366f1; padding:9px 18px; border-radius:12px; border:1.5px solid #c7d2fe; cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif; font-size:0.82rem; font-weight:600; transition:all 0.18s; display:inline-flex; align-items:center; gap:5px; }
+        .btn-outline:hover { background:#eef2ff; border-color:#6366f1; }
+        .dark .btn-outline { border-color:#3730a3; }
+        .dark .btn-outline:hover { background:rgba(99,102,241,0.15); }
+
+        .btn-ghost-red { background:#fff0f0; color:#ef4444; border:1.5px solid #fecaca; padding:9px 18px; border-radius:12px; cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif; font-size:0.82rem; font-weight:600; transition:all 0.18s; }
+        .btn-ghost-red:hover { background:#fee2e2; }
+        .dark .btn-ghost-red { background:rgba(239,68,68,0.1); border-color:rgba(239,68,68,0.3); }
+        .dark .btn-ghost-red:hover { background:rgba(239,68,68,0.18); }
+
+        /* ── AI SUGGESTION ── */
+        .ai-suggestion { position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:20; padding:10px 12px; background:var(--ai-bg); border:1.5px solid var(--ai-border); border-radius:14px; display:flex; align-items:center; gap:10px; box-shadow:0 6px 20px rgba(99,102,241,0.14); }
+
+        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.85)} }
 
         /* ── TABLE ── */
-        .exp-table { width: 100%; border-collapse: collapse; }
-        .exp-table th { padding: 11px 16px; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em; color: #94a3b8; font-weight: 600; border-bottom: 1.5px solid #f1f3f9; font-family: 'Plus Jakarta Sans', sans-serif; }
-        .exp-table td { padding: 14px 16px; border-bottom: 1px solid #f1f3f9; font-size: 0.9rem; }
-        .exp-table tr:last-child td { border-bottom: none; }
-        .exp-table tbody tr:hover td { background: #fafbff; }
+        .exp-table { width:100%; border-collapse:collapse; }
+        .exp-table th { padding:11px 16px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.09em; color:var(--text3); font-weight:600; border-bottom:1.5px solid var(--table-border); font-family:'Plus Jakarta Sans',sans-serif; }
+        .exp-table td { padding:14px 16px; border-bottom:1px solid var(--table-border); font-size:0.9rem; }
+        .exp-table tr:last-child td { border-bottom:none; }
+        .exp-table tbody tr:hover td { background:var(--table-hover); }
+        .cat-badge { display:inline-block; padding:4px 12px; border-radius:20px; font-size:0.74rem; font-weight:600; }
 
-        .cat-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.74rem; font-weight: 600; }
+        /* ── MONTHLY ── */
+        .month-col { display:flex; flex-direction:column; align-items:center; gap:6px; flex:1; min-width:40px; }
+        .month-bar-bg { width:100%; background:var(--inp-bg); border-radius:8px 8px 4px 4px; display:flex; align-items:flex-end; height:110px; overflow:hidden; }
+        .month-bar-fill { width:100%; transition:height 0.9s cubic-bezier(0.4,0,0.2,1); border-radius:8px 8px 0 0; }
 
-        /* ── MONTHLY CHART ── */
-        .month-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; min-width: 40px; }
-        .month-bar-bg { width: 100%; background: #f1f3f9; border-radius: 8px 8px 4px 4px; display: flex; align-items: flex-end; height: 110px; overflow: hidden; }
-        .month-bar-fill { width: 100%; transition: height 0.9s cubic-bezier(0.4,0,0.2,1); border-radius: 8px 8px 0 0; }
+        /* ── STAT MINI ── */
+        .stat-mini { background:var(--stat-bg); border:1px solid var(--stat-border); border-radius:14px; padding:18px 20px; transition:background 0.3s; }
+        .stat-mini-label { font-size:0.72rem; font-weight:600; text-transform:uppercase; letter-spacing:0.09em; color:var(--text3); margin-bottom:6px; }
+        .stat-mini-val { font-family:'Outfit',sans-serif; font-weight:700; font-size:1.4rem; color:var(--text); letter-spacing:-0.01em; }
 
-        /* ── STAT MINI CARDS ── */
-        .stat-mini { background: #f8f9fc; border: 1px solid #e8eaf2; border-radius: 14px; padding: 18px 20px; }
-        .stat-mini-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: #94a3b8; margin-bottom: 6px; }
-        .stat-mini-val { font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 1.4rem; color: #1e1e2e; letter-spacing: -0.01em; }
-
-        /* ── RECENT ITEMS ── */
-        .recent-item {
-          display: flex; justify-content: space-between; align-items: center;
-          padding: 13px 14px; background: #f8f9fc; border-radius: 13px;
-          border: 1px solid #f0f2f8;
-          transition: background 0.15s, border-color 0.15s;
-          margin-bottom: 8px;
-        }
-        .recent-item:hover { background: #eef2ff; border-color: #c7d2fe; }
-        .recent-item:last-child { margin-bottom: 0; }
+        /* ── RECENT ── */
+        .recent-item { display:flex; justify-content:space-between; align-items:center; padding:13px 14px; background:var(--recent-bg); border-radius:13px; border:1px solid var(--recent-border); transition:background 0.15s,border-color 0.15s; margin-bottom:8px; }
+        .recent-item:hover { background:var(--recent-hover); border-color:#c7d2fe; }
+        .recent-item:last-child { margin-bottom:0; }
 
         /* ── CHAT ── */
-        .chat-window {
-          position: fixed; bottom: 92px; right: 22px; width: 355px; max-height: 490px;
-          display: flex; flex-direction: column;
-          background: #fff; border: 1px solid #e2e8f0;
-          border-radius: 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.15), 0 0 0 1px rgba(99,102,241,0.08);
-          z-index: 200; overflow: hidden;
-          animation: chatSlide 0.22s cubic-bezier(0.34,1.56,0.64,1);
-        }
+        .chat-window { position:fixed; bottom:92px; right:22px; width:355px; max-height:490px; display:flex; flex-direction:column; background:var(--chat-bg); border:1px solid var(--chat-border); border-radius:22px; box-shadow:0 20px 50px rgba(0,0,0,0.15),0 0 0 1px rgba(99,102,241,0.08); z-index:200; overflow:hidden; animation:chatSlide 0.22s cubic-bezier(0.34,1.56,0.64,1); transition:background 0.3s; }
+        @keyframes chatSlide { from{opacity:0;transform:translateY(20px) scale(0.95)} to{opacity:1;transform:none} }
+        .chat-head { padding:14px 16px; background:linear-gradient(135deg,#1a1060,#2d1b8e); display:flex; align-items:center; justify-content:space-between; }
+        .chat-msgs { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; background:var(--chat-msg-bg); scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent; transition:background 0.3s; }
+        .msg-u { align-self:flex-end; background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; padding:10px 14px; border-radius:16px 16px 4px 16px; font-size:0.85rem; max-width:80%; line-height:1.45; font-family:'Plus Jakarta Sans',sans-serif; }
+        .msg-a { align-self:flex-start; background:var(--card-bg); color:var(--text); padding:10px 14px; border-radius:16px 16px 16px 4px; font-size:0.85rem; max-width:85%; line-height:1.5; border:1px solid var(--card-border); box-shadow:0 1px 4px rgba(0,0,0,0.05); font-family:'Plus Jakarta Sans',sans-serif; transition:background 0.3s; }
+        .chat-foot { padding:10px 12px; border-top:1px solid var(--table-border); display:flex; gap:8px; background:var(--chat-bg); transition:background 0.3s; }
 
-        @keyframes chatSlide {
-          from { opacity: 0; transform: translateY(20px) scale(0.95); }
-          to { opacity: 1; transform: none; }
-        }
+        .fab { position:fixed; bottom:24px; right:22px; width:56px; height:56px; background:linear-gradient(135deg,#6366f1,#8b5cf6); border-radius:18px; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 24px rgba(99,102,241,0.4); border:none; transition:transform 0.18s,box-shadow 0.18s; z-index:199; font-size:1.35rem; }
+        .fab:hover { transform:scale(1.08) translateY(-2px); box-shadow:0 12px 30px rgba(99,102,241,0.55); }
 
-        .chat-head {
-          padding: 14px 16px;
-          background: linear-gradient(135deg, #1a1060, #2d1b8e);
-          display: flex; align-items: center; justify-content: space-between;
-        }
-
-        .chat-msgs {
-          flex: 1; overflow-y: auto; padding: 14px;
-          display: flex; flex-direction: column; gap: 10px;
-          background: #fafbff;
-          scrollbar-width: thin; scrollbar-color: #e2e8f0 transparent;
-        }
-
-        .msg-u {
-          align-self: flex-end;
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          color: #fff;
-          padding: 10px 14px; border-radius: 16px 16px 4px 16px;
-          font-size: 0.85rem; max-width: 80%; line-height: 1.45;
-          font-family: 'Plus Jakarta Sans', sans-serif;
-        }
-
-        .msg-a {
-          align-self: flex-start;
-          background: #fff;
-          color: #334155;
-          padding: 10px 14px; border-radius: 16px 16px 16px 4px;
-          font-size: 0.85rem; max-width: 85%; line-height: 1.5;
-          border: 1px solid #e8eaf2;
-          box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-          font-family: 'Plus Jakarta Sans', sans-serif;
-        }
-
-        .chat-foot { padding: 10px 12px; border-top: 1px solid #f1f3f9; display: flex; gap: 8px; background: #fff; }
-
-        .fab {
-          position: fixed; bottom: 24px; right: 22px;
-          width: 56px; height: 56px;
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          border-radius: 18px; display: flex; align-items: center; justify-content: center;
-          cursor: pointer; box-shadow: 0 8px 24px rgba(99,102,241,0.4); border: none;
-          transition: transform 0.18s, box-shadow 0.18s; z-index: 199; font-size: 1.35rem;
-        }
-        .fab:hover { transform: scale(1.08) translateY(-2px); box-shadow: 0 12px 30px rgba(99,102,241,0.55); }
-
-        .dot { width: 5px; height: 5px; background: #6366f1; border-radius: 50%; display: inline-block; animation: dotB 1.1s ease-in-out infinite; }
-        .dot:nth-child(2) { animation-delay: .18s; }
-        .dot:nth-child(3) { animation-delay: .36s; }
-        @keyframes dotB { 0%,60%,100% { transform: translateY(0); opacity:.35; } 30% { transform: translateY(-5px); opacity:1; } }
+        .dot { width:5px; height:5px; background:#6366f1; border-radius:50%; display:inline-block; animation:dotB 1.1s ease-in-out infinite; }
+        .dot:nth-child(2){animation-delay:.18s} .dot:nth-child(3){animation-delay:.36s}
+        @keyframes dotB{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-5px);opacity:1}}
 
         /* ── MISC ── */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
       `}</style>
 
-      <div className="dash-root">
+      <div className={`dash-root${darkMode ? ' dark' : ''}`}>
 
         {/* ── BUBBLE FINANCIAL QUOTES ── */}
         <QuoteBubbles />
@@ -756,8 +692,18 @@ const Dashboard: React.FC = () => {
               <div className="brand-name">💰 FinanceAI</div>
               <div className="brand-sub">Your intelligent money companion{username ? <span style={{ color: '#6366f1', fontWeight: 600, marginLeft: 8 }}>· Welcome back, {username}!</span> : null}</div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <button className="btn-outline" onClick={exportCSV}>↓ Export CSV</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', background: 'var(--inp-bg)', border: '1.5px solid var(--inp-border)', borderRadius: 12 }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text2)', userSelect: 'none' }}>
+                  {darkMode ? '🌙' : '☀️'}
+                </span>
+                <button
+                  className={`dm-toggle${darkMode ? ' on' : ''}`}
+                  onClick={() => setDarkMode(p => !p)}
+                  title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                />
+              </div>
               <button className="btn-ghost-red" onClick={handleLogout}>Logout</button>
             </div>
           </div>
@@ -818,9 +764,9 @@ const Dashboard: React.FC = () => {
 
           {/* ── TAB BAR ── */}
           <div className="tab-bar">
-            {(['overview','monthly','expenses'] as const).map(t => (
+            {(['overview','monthly','expenses','report'] as const).map(t => (
               <button key={t} className={`tab-btn ${activeTab === t ? 'on' : ''}`} onClick={() => setActiveTab(t)}>
-                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : '📋 All Expenses'}
+                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : t === 'expenses' ? '📋 All Expenses' : '📄 AI Report'}
               </button>
             ))}
           </div>
@@ -854,7 +800,7 @@ const Dashboard: React.FC = () => {
                     })}
                   </div>
                 ) : (
-                  <p style={{ color: '#b0b8cc', textAlign: 'center', padding: '32px 0', fontSize: '0.875rem' }}>Add expenses to see breakdown</p>
+                  <p style={{ color: 'var(--text3)', textAlign: 'center', padding: '32px 0', fontSize: '0.875rem' }}>Add expenses to see breakdown</p>
                 )}
               </div>
 
@@ -871,12 +817,12 @@ const Dashboard: React.FC = () => {
                               {exp.category[0]}
                             </div>
                             <div>
-                              <p style={{ fontWeight: 600, fontSize: '0.875rem', color: '#1e1e2e' }}>{exp.description}</p>
+                              <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)' }}>{exp.description}</p>
                               <p style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 1 }}>{new Date(exp.date).toLocaleDateString()}</p>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: '#1e1e2e', fontSize: '1rem' }}>${exp.amount.toFixed(2)}</p>
+                            <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: 'var(--text)', fontSize: '1rem' }}>${exp.amount.toFixed(2)}</p>
                             <span style={{ fontSize: '0.7rem', color: col, fontWeight: 600 }}>{exp.category}</span>
                           </div>
                         </div>
@@ -884,7 +830,7 @@ const Dashboard: React.FC = () => {
                     })}
                   </div>
                 ) : (
-                  <p style={{ color: '#b0b8cc', textAlign: 'center', padding: '32px 0', fontSize: '0.875rem' }}>No expenses yet</p>
+                  <p style={{ color: 'var(--text3)', textAlign: 'center', padding: '32px 0', fontSize: '0.875rem' }}>No expenses yet</p>
                 )}
               </div>
             </div>
@@ -902,19 +848,19 @@ const Dashboard: React.FC = () => {
                       const isCurr = mon === currentMonth;
                       return (
                         <div key={mon} className="month-col">
-                          <p style={{ fontFamily: 'Outfit,sans-serif', color: isCurr ? '#6366f1' : '#94a3b8', fontSize: '0.68rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                          <p style={{ fontFamily: 'Outfit,sans-serif', color: isCurr ? '#6366f1' : 'var(--text3)', fontSize: '0.68rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
                             ${val >= 1000 ? (val/1000).toFixed(1)+'k' : val.toFixed(0)}
                           </p>
                           <div className="month-bar-bg">
                             <div className="month-bar-fill" style={{ height: `${h}%`, background: isCurr ? 'linear-gradient(180deg,#8b5cf6,#6366f1)' : 'linear-gradient(180deg,#a5b4fc,#818cf8)' }} />
                           </div>
-                          <p style={{ color: isCurr ? '#6366f1' : '#94a3b8', fontSize: '0.68rem', fontWeight: isCurr ? 700 : 400, whiteSpace: 'nowrap' }}>{mon}</p>
+                          <p style={{ color: isCurr ? '#6366f1' : 'var(--text3)', fontSize: '0.68rem', fontWeight: isCurr ? 700 : 400, whiteSpace: 'nowrap' }}>{mon}</p>
                         </div>
                       );
                     })}
                   </div>
                 ) : (
-                  <p style={{ color: '#b0b8cc', textAlign: 'center', padding: '40px 0', fontSize: '0.875rem' }}>No data yet</p>
+                  <p style={{ color: 'var(--text3)', textAlign: 'center', padding: '40px 0', fontSize: '0.875rem' }}>No data yet</p>
                 )}
               </div>
 
@@ -930,6 +876,115 @@ const Dashboard: React.FC = () => {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* ── REPORT TAB ── */}
+          {activeTab === 'report' && (
+            <div style={{ marginBottom: 20 }}>
+              {/* Generate button */}
+              {!report && !reportLoading && (
+                <div className="card" style={{ textAlign: 'center', padding: '52px 28px' }}>
+                  <div style={{ fontSize: '3.5rem', marginBottom: 16 }}>📊</div>
+                  <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.4rem', color: 'var(--text)', marginBottom: 10 }}>AI Monthly Report</h2>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: 420, margin: '0 auto 28px', lineHeight: 1.6 }}>
+                    Claude analyses your spending and generates a personalised financial report with insights, trends, and actionable recommendations.
+                  </p>
+                  {reportError && <p style={{ color: '#f87171', marginBottom: 16, fontSize: '0.875rem' }}>{reportError}</p>}
+                  <button className="btn-primary" onClick={generateReport} style={{ fontSize: '1rem', padding: '14px 36px' }}>
+                    ✨ Generate My Report
+                  </button>
+                </div>
+              )}
+
+              {/* Loading state */}
+              {reportLoading && (
+                <div className="card" style={{ textAlign: 'center', padding: '64px 28px' }}>
+                  <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center', marginBottom: 20 }}>
+                    <span className="dot" /><span className="dot" /><span className="dot" />
+                  </div>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Claude is analysing your spending…</p>
+                  <p style={{ color: 'var(--text-faint)', fontSize: '0.78rem', marginTop: 6 }}>This takes about 10–15 seconds</p>
+                </div>
+              )}
+
+              {/* Report content */}
+              {report && !reportLoading && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+                  {/* Report header */}
+                  <div className="card" style={{ background: 'linear-gradient(135deg,#1a1060,#2d1b8e)', border: 'none', color: '#fff' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+                      <div>
+                        <p style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.45)', marginBottom: 6 }}>AI Financial Report</p>
+                        <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.8rem', letterSpacing: '-0.02em' }}>{report.report_label}</h2>
+                        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.78rem', marginTop: 4 }}>Generated for {report.username} · {new Date(report.generated_at).toLocaleDateString()}</p>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn-primary" onClick={downloadReportPDF} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', fontSize: '0.82rem', padding: '9px 16px' }}>
+                          ↓ Download
+                        </button>
+                        <button className="btn-outline" onClick={() => setReport(null)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', fontSize: '0.82rem' }}>
+                          ↺ Regenerate
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Stats row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 14, marginTop: 28 }}>
+                      {[
+                        { label: 'Total Spent', val: `$${report.total.toFixed(2)}`, color: '#c4b5fd' },
+                        { label: 'vs Last Month', val: report.mom_pct !== null ? `${report.mom_pct > 0 ? '+' : ''}${report.mom_pct}%` : 'N/A', color: report.mom_pct > 0 ? '#fca5a5' : '#6ee7b7' },
+                        { label: 'Daily Avg', val: `$${report.avg_daily.toFixed(2)}`, color: '#93c5fd' },
+                        { label: 'Transactions', val: report.tx_count, color: '#a5f3fc' },
+                      ].map((s, i) => (
+                        <div key={i} style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: '14px 16px' }}>
+                          <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>{s.label}</div>
+                          <div style={{ fontFamily: 'Outfit,sans-serif', fontWeight: 800, fontSize: '1.3rem', color: s.color }}>{s.val}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Category breakdown */}
+                  <div className="card">
+                    <div className="card-title">Spending Breakdown</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+                      {Object.entries(report.category_totals as Record<string,number>).map(([cat, amt], i) => {
+                        const pct = Math.round((amt as number / report.total) * 100);
+                        const col = CATEGORY_COLORS[cat] || '#6b7280';
+                        return (
+                          <div key={i}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5, fontSize: '0.86rem' }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: 'var(--text)' }}>
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: col, display: 'inline-block' }} />{cat}
+                              </span>
+                              <span style={{ color: 'var(--text-muted)' }}>${(amt as number).toFixed(2)} <span style={{ color: 'var(--text-faint)' }}>({pct}%)</span></span>
+                            </div>
+                            <div style={{ height: 5, background: 'var(--bg-month-bar)', borderRadius: 4, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, background: col, borderRadius: 4, opacity: 0.85, transition: 'width 1s cubic-bezier(0.4,0,0.2,1)' }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* AI Narrative */}
+                  <div className="card">
+                    <div className="card-title">AI Analysis</div>
+                    <div style={{ lineHeight: 1.75, color: 'var(--text-sub)', fontSize: '0.9rem' }}>
+                      {report.narrative.split('\n').map((line: string, i: number) => {
+                        if (line.startsWith('## ')) return <h3 key={i} style={{ fontFamily: 'Outfit,sans-serif', fontWeight: 700, fontSize: '1rem', color: '#6366f1', margin: '22px 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{line.replace('## ','')}</h3>;
+                        if (line.startsWith('- ')) return <p key={i} style={{ paddingLeft: 16, borderLeft: '2px solid #c7d2fe', marginBottom: 8, color: 'var(--text-sub)' }}>{'• ' + line.slice(2)}</p>;
+                        if (line.trim() === '') return <div key={i} style={{ height: 6 }} />;
+                        return <p key={i} style={{ marginBottom: 8 }}>{line}</p>;
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+              )}
             </div>
           )}
 
@@ -1022,7 +1077,7 @@ const Dashboard: React.FC = () => {
                 <button className="btn-outline" onClick={exportCSV}>↓ Export CSV</button>
               </div>
               {expenses.length === 0 ? (
-                <p style={{ color: '#b0b8cc', textAlign: 'center', padding: '44px 0', fontSize: '0.875rem' }}>No expenses yet. Add your first one above!</p>
+                <p style={{ color: 'var(--text3)', textAlign: 'center', padding: '44px 0', fontSize: '0.875rem' }}>No expenses yet. Add your first one above!</p>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
                   <table className="exp-table">
@@ -1037,14 +1092,14 @@ const Dashboard: React.FC = () => {
                         const col = CATEGORY_COLORS[exp.category] || '#6b7280';
                         return (
                           <tr key={exp.id}>
-                            <td style={{ color: '#94a3b8', fontSize: '0.84rem' }}>{new Date(exp.date).toLocaleDateString()}</td>
-                            <td style={{ color: '#1e1e2e', fontWeight: 500 }}>{exp.description}</td>
+                            <td style={{ color: 'var(--text3)', fontSize: '0.84rem' }}>{new Date(exp.date).toLocaleDateString()}</td>
+                            <td style={{ color: 'var(--text)', fontWeight: 500 }}>{exp.description}</td>
                             <td>
                               <span className="cat-badge" style={{ background: `${col}15`, color: col, border: `1px solid ${col}30` }}>
                                 {exp.category}
                               </span>
                             </td>
-                            <td style={{ textAlign: 'right', fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: '#1e1e2e' }}>${exp.amount.toFixed(2)}</td>
+                            <td style={{ textAlign: 'right', fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: 'var(--text)' }}>${exp.amount.toFixed(2)}</td>
                             <td style={{ textAlign: 'center' }}>
                               <button onClick={() => handleDelete(exp.id)}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#cbd5e1', fontSize: '1rem', padding: '4px 8px', borderRadius: 6, transition: 'color 0.15s' }}
@@ -1068,8 +1123,8 @@ const Dashboard: React.FC = () => {
         {/* ── FEEDBACK MODAL ── */}
         {showFeedbackModal && feedbackPredicted && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '10px 14px', width: 'auto', maxWidth: '95vw', boxShadow: '0 12px 40px rgba(0,0,0,0.14)', display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
-              <span style={{ fontSize: '0.77rem', color: '#64748b', fontFamily: 'Plus Jakarta Sans, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', borderRadius: 14, padding: '10px 14px', width: 'auto', maxWidth: '95vw', boxShadow: '0 12px 40px rgba(0,0,0,0.14)', display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+              <span style={{ fontSize: '0.77rem', color: 'var(--text2)', fontFamily: 'Plus Jakarta Sans, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 Wrong? Pick:
               </span>
               {CATEGORIES.map(cat => (
