@@ -12,6 +12,7 @@ dist/
 build/
 .env
 .env.local
+category_model.pkl
 
 # Node/Frontend
 node_modules/
