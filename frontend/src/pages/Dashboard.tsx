@@ -10,6 +10,15 @@ interface Expense {
   date: string;
 }
 
+interface Goal {
+  id: string;
+  name: string;
+  target: number;
+  saved: number;
+  deadline: string;
+  emoji: string;
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -87,7 +96,7 @@ const Dashboard: React.FC = () => {
   const [feedbackPredicted, setFeedbackPredicted] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses' | 'report' | 'budgets'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses' | 'report' | 'budgets' | 'goals'>('overview');
   const [username, setUsername] = useState('');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
 
@@ -106,6 +115,28 @@ const Dashboard: React.FC = () => {
   const [nlInput, setNlInput] = useState('');
   const [nlParsing, setNlParsing] = useState(false);
   const [nlMode, setNlMode] = useState(false);
+
+  // Savings Goals state
+  const [goals, setGoals] = useState<Goal[]>(() => {
+    try { return JSON.parse(localStorage.getItem('savingsGoals') || '[]'); } catch { return []; }
+  });
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [goalName, setGoalName] = useState('');
+  const [goalTarget, setGoalTarget] = useState('');
+  const [goalSaved, setGoalSaved] = useState('');
+  const [goalDeadline, setGoalDeadline] = useState('');
+  const [goalEmoji, setGoalEmoji] = useState('🎯');
+  const [goalAddAmount, setGoalAddAmount] = useState('');
+  const [goalAddId, setGoalAddId] = useState('');
+
+  // Receipt scan state
+  const [receiptScanning, setReceiptScanning] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
+
+  // Email digest state
+  const [digestEmail, setDigestEmail] = useState(() => localStorage.getItem('digestEmail') || '');
+  const [digestSaving, setDigestSaving] = useState(false);
+  const [showDigestModal, setShowDigestModal] = useState(false);
 
   // Report state
   const [reportLoading, setReportLoading] = useState(false);
@@ -140,6 +171,10 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('darkMode', String(darkMode));
   }, [darkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('savingsGoals', JSON.stringify(goals));
+  }, [goals]);
 
   useEffect(() => {
     localStorage.setItem('budgets', JSON.stringify(budgets));
@@ -364,6 +399,83 @@ const Dashboard: React.FC = () => {
       showToast(err?.response?.data?.msg || 'Could not parse. Try: "Coffee $4.50"', 'error');
     } finally {
       setNlParsing(false);
+    }
+  };
+
+
+  // ── Savings Goal handlers ──────────────────────
+  const saveGoal = () => {
+    if (!goalName || !goalTarget || parseFloat(goalTarget) <= 0) return;
+    const newGoal: Goal = {
+      id: Date.now().toString(),
+      name: goalName,
+      target: parseFloat(goalTarget),
+      saved: parseFloat(goalSaved) || 0,
+      deadline: goalDeadline,
+      emoji: goalEmoji,
+    };
+    setGoals(prev => [...prev, newGoal]);
+    setGoalName(''); setGoalTarget(''); setGoalSaved('');
+    setGoalDeadline(''); setGoalEmoji('🎯');
+    setShowGoalModal(false);
+    showToast(`Goal created: ${newGoal.name}`, 'success');
+  };
+
+  const deleteGoal = (id: string) => {
+    setGoals(prev => prev.filter(g => g.id !== id));
+    showToast('Goal removed', 'success');
+  };
+
+  const addToGoal = (id: string) => {
+    const amt = parseFloat(goalAddAmount);
+    if (!amt || amt <= 0) return;
+    setGoals(prev => prev.map(g => g.id === id ? { ...g, saved: Math.min(g.saved + amt, g.target) } : g));
+    setGoalAddAmount(''); setGoalAddId('');
+    showToast(`Added $${amt.toFixed(2)} to goal!`, 'success');
+  };
+
+  // ── Receipt scan handler ───────────────────────
+  const handleReceiptScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setReceiptScanning(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await api.post('/scan-receipt', {
+        image: base64,
+        media_type: file.type || 'image/jpeg',
+      });
+      const { amount: a, description: d, category: c } = res.data;
+      setAmount(String(a));
+      setDescription(d);
+      setCategory(c);
+      showToast(`Receipt scanned: ${d} · $${a}`, 'success');
+    } catch (err: any) {
+      showToast(err?.response?.data?.msg || 'Could not read receipt', 'error');
+    } finally {
+      setReceiptScanning(false);
+      if (receiptInputRef.current) receiptInputRef.current.value = '';
+    }
+  };
+
+  // ── Email digest handler ────────────────────────
+  const saveDigestEmail = async () => {
+    if (!digestEmail.trim()) return;
+    setDigestSaving(true);
+    try {
+      await api.post('/subscribe-digest', { email: digestEmail });
+      localStorage.setItem('digestEmail', digestEmail);
+      setShowDigestModal(false);
+      showToast('Weekly digest subscribed!', 'success');
+    } catch (err: any) {
+      showToast(err?.response?.data?.msg || 'Failed to subscribe', 'error');
+    } finally {
+      setDigestSaving(false);
     }
   };
 
@@ -781,6 +893,11 @@ const Dashboard: React.FC = () => {
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <button className="btn-outline" onClick={exportCSV}>↓ Export CSV</button>
+              <button className="btn-outline" onClick={() => setShowDigestModal(true)} title="Weekly email digest">📧</button>
+              <label className="btn-outline" style={{ cursor: receiptScanning ? 'wait' : 'pointer', position: 'relative' }} title="Scan a receipt">
+                {receiptScanning ? '⏳' : '📷'}
+                <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptScan} style={{ display: 'none' }} />
+              </label>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', background: 'var(--inp-bg)', border: '1.5px solid var(--inp-border)', borderRadius: 12 }}>
                 <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text2)', userSelect: 'none' }}>
                   {darkMode ? '🌙' : '☀️'}
@@ -851,9 +968,9 @@ const Dashboard: React.FC = () => {
 
           {/* ── TAB BAR ── */}
           <div className="tab-bar">
-            {(['overview','monthly','expenses','report','budgets'] as const).map(t => (
+            {(['overview','monthly','expenses','report','budgets','goals'] as const).map(t => (
               <button key={t} className={`tab-btn ${activeTab === t ? 'on' : ''}`} onClick={() => setActiveTab(t)}>
-                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : t === 'expenses' ? '📋 All Expenses' : t === 'report' ? '📄 AI Report' : '🎯 Budgets'}
+                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : t === 'expenses' ? '📋 All Expenses' : t === 'report' ? '📄 AI Report' : t === 'budgets' ? '🎯 Budgets' : '🏆 Goals'}
               </button>
             ))}
           </div>
@@ -1179,6 +1296,124 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
+
+          {/* ── GOALS TAB ── */}
+          {activeTab === 'goals' && (
+            <div style={{ marginBottom: 20 }}>
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
+                  <div className="card-title" style={{ margin: 0 }}>🏆 Savings Goals</div>
+                  <button className="btn-primary" onClick={() => setShowGoalModal(true)} style={{ fontSize: '0.82rem', padding: '8px 18px' }}>+ New Goal</button>
+                </div>
+
+                {goals.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '44px 0' }}>
+                    <div style={{ fontSize: '3.5rem', marginBottom: 12 }}>🏆</div>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 6 }}>No savings goals yet</p>
+                    <p style={{ color: 'var(--text-faint)', fontSize: '0.8rem' }}>Set a goal — holiday, emergency fund, new laptop — and track progress here</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px,1fr))', gap: 16 }}>
+                    {goals.map(goal => {
+                      const pct = Math.min((goal.saved / goal.target) * 100, 100);
+                      const done = goal.saved >= goal.target;
+                      const remaining = Math.max(goal.target - goal.saved, 0);
+                      const daysLeft = goal.deadline
+                        ? Math.ceil((new Date(goal.deadline).getTime() - Date.now()) / 86400000)
+                        : null;
+                      const monthsLeft = daysLeft !== null ? Math.max(Math.ceil(daysLeft / 30), 1) : null;
+                      const reqPerMonth = monthsLeft && remaining > 0 ? remaining / monthsLeft : null;
+
+                      return (
+                        <div key={goal.id} style={{ background: 'var(--bg-input)', border: `1.5px solid ${done ? '#6ee7b7' : 'var(--border)'}`, borderRadius: 16, padding: '20px', position: 'relative' }}>
+                          {done && <div style={{ position: 'absolute', top: 12, right: 12, fontSize: '1.2rem' }}>✅</div>}
+
+                          <div style={{ fontSize: '2rem', marginBottom: 8 }}>{goal.emoji}</div>
+                          <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: 'var(--text)', marginBottom: 4 }}>{goal.name}</p>
+
+                          {/* Progress ring + amounts */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
+                            <div style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
+                              <svg width="56" height="56" style={{ transform: 'rotate(-90deg)' }} viewBox="0 0 42 42">
+                                <circle cx="21" cy="21" r="16" fill="none" stroke="var(--bg-month-bar)" strokeWidth="4" />
+                                <circle cx="21" cy="21" r="16" fill="none"
+                                  stroke={done ? '#10b981' : pct >= 75 ? '#6366f1' : pct >= 40 ? '#f59e0b' : '#94a3b8'}
+                                  strokeWidth="4"
+                                  strokeDasharray={`${pct}, 100`}
+                                  strokeLinecap="round"
+                                  style={{ transition: 'all 0.8s' }}
+                                />
+                              </svg>
+                              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', fontWeight: 700, color: 'var(--text)' }}>
+                                {Math.round(pct)}%
+                              </div>
+                            </div>
+                            <div>
+                              <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.1rem', color: 'var(--text)', margin: 0 }}>${goal.saved.toFixed(2)}</p>
+                              <p style={{ fontSize: '0.75rem', color: 'var(--text-faint)', margin: 0 }}>of ${goal.target.toFixed(2)}</p>
+                              {goal.deadline && (
+                                <p style={{ fontSize: '0.7rem', color: daysLeft !== null && daysLeft < 30 ? '#ef4444' : 'var(--text-faint)', margin: '2px 0 0', fontWeight: 600 }}>
+                                  {daysLeft !== null && daysLeft > 0 ? `${daysLeft}d left` : daysLeft === 0 ? 'Due today!' : 'Past deadline'}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Progress bar */}
+                          <div style={{ height: 5, background: 'var(--bg-month-bar)', borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
+                            <div style={{ height: '100%', width: `${pct}%`, background: done ? '#10b981' : 'linear-gradient(90deg,#6366f1,#8b5cf6)', borderRadius: 4, transition: 'width 0.9s' }} />
+                          </div>
+
+                          {/* Required per month */}
+                          {reqPerMonth && !done && (
+                            <p style={{ fontSize: '0.72rem', color: '#6366f1', fontWeight: 600, marginBottom: 10 }}>
+                              Save ${reqPerMonth.toFixed(0)}/mo to hit your deadline
+                            </p>
+                          )}
+
+                          {/* Add funds row */}
+                          {!done && (
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              {goalAddId === goal.id ? (
+                                <>
+                                  <input
+                                    type="number" step="0.01" placeholder="Amount"
+                                    value={goalAddAmount} onChange={e => setGoalAddAmount(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && addToGoal(goal.id)}
+                                    className="inp" style={{ padding: '7px 12px', fontSize: '0.82rem', flex: 1 }}
+                                    autoFocus
+                                  />
+                                  <button onClick={() => addToGoal(goal.id)} className="btn-primary" style={{ padding: '7px 14px', fontSize: '0.82rem' }}>Add</button>
+                                  <button onClick={() => { setGoalAddId(''); setGoalAddAmount(''); }} style={{ padding: '7px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 10, cursor: 'pointer', color: 'var(--text-faint)', fontSize: '0.82rem' }}>✕</button>
+                                </>
+                              ) : (
+                                <button onClick={() => setGoalAddId(goal.id)} className="btn-outline" style={{ flex: 1, justifyContent: 'center', fontSize: '0.8rem', padding: '7px' }}>
+                                  + Add Funds
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {done && (
+                            <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 10, padding: '8px 12px', textAlign: 'center', fontSize: '0.8rem', color: '#059669', fontWeight: 600 }}>
+                              🎉 Goal reached!
+                            </div>
+                          )}
+
+                          <button onClick={() => deleteGoal(goal.id)} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: '0.72rem', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', width: '100%', textAlign: 'right' }}
+                            onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                            onMouseLeave={e => e.currentTarget.style.color = ''}>
+                            Remove goal
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── ADD EXPENSE (always visible) ── */}
           <div className="card" style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
@@ -1300,6 +1535,11 @@ const Dashboard: React.FC = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
                 <div className="card-title" style={{ margin: 0 }}>All Expenses ({expenses.length})</div>
                 <button className="btn-outline" onClick={exportCSV}>↓ Export CSV</button>
+              <button className="btn-outline" onClick={() => setShowDigestModal(true)} title="Weekly email digest">📧</button>
+              <label className="btn-outline" style={{ cursor: receiptScanning ? 'wait' : 'pointer', position: 'relative' }} title="Scan a receipt">
+                {receiptScanning ? '⏳' : '📷'}
+                <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptScan} style={{ display: 'none' }} />
+              </label>
               </div>
               {expenses.length === 0 ? (
                 <p style={{ color: 'var(--text3)', textAlign: 'center', padding: '44px 0', fontSize: '0.875rem' }}>No expenses yet. Add your first one above!</p>
@@ -1380,6 +1620,77 @@ const Dashboard: React.FC = () => {
                 <button onClick={saveBudget} className="btn-primary" style={{ flex: 1 }}>Save Budget</button>
                 <button onClick={() => { setShowBudgetModal(false); setBudgetAmount(''); }} style={{ flex: 1, padding: '13px', borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
               </div>
+            </div>
+          </div>
+        )}
+
+
+        {/* ── GOAL MODAL ── */}
+        {showGoalModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18, padding: 24, maxWidth: 420, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+              <h3 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: 'var(--text)', marginBottom: 18 }}>🏆 New Savings Goal</h3>
+
+              {/* Emoji picker row */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Icon</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {['🎯','✈️','🏠','🚗','💻','📱','🎓','💍','🏖️','🐾','🎸','💪'].map(e => (
+                    <button key={e} onClick={() => setGoalEmoji(e)}
+                      style={{ width: 36, height: 36, fontSize: '1.2rem', border: `2px solid ${goalEmoji === e ? '#6366f1' : 'var(--border)'}`, borderRadius: 9, background: goalEmoji === e ? '#eef2ff' : 'var(--bg-input)', cursor: 'pointer' }}>
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Goal Name</label>
+                <input type="text" placeholder="e.g. Holiday Fund" value={goalName} onChange={e => setGoalName(e.target.value)} className="inp" />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Target ($)</label>
+                  <input type="number" step="0.01" placeholder="2000" value={goalTarget} onChange={e => setGoalTarget(e.target.value)} className="inp" />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Already Saved ($)</label>
+                  <input type="number" step="0.01" placeholder="0" value={goalSaved} onChange={e => setGoalSaved(e.target.value)} className="inp" />
+                </div>
+              </div>
+              <div style={{ marginBottom: 22 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Deadline (optional)</label>
+                <input type="date" value={goalDeadline} onChange={e => setGoalDeadline(e.target.value)} className="inp" />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={saveGoal} className="btn-primary" style={{ flex: 1 }}>Create Goal</button>
+                <button onClick={() => { setShowGoalModal(false); setGoalName(''); setGoalTarget(''); setGoalSaved(''); setGoalDeadline(''); }} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── EMAIL DIGEST MODAL ── */}
+        {showDigestModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18, padding: 24, maxWidth: 400, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+              <h3 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: 'var(--text)', marginBottom: 8 }}>📧 Weekly Email Digest</h3>
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.6 }}>
+                Every Monday morning you'll receive a summary of last week's spending, your top category, budget status, and one AI tip.
+              </p>
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Your Email</label>
+                <input type="email" placeholder="you@example.com" value={digestEmail} onChange={e => setDigestEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveDigestEmail()} className="inp" autoFocus />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={saveDigestEmail} disabled={digestSaving || !digestEmail.trim()} className="btn-primary" style={{ flex: 1, opacity: digestSaving ? 0.6 : 1 }}>
+                  {digestSaving ? 'Saving...' : '✓ Subscribe'}
+                </button>
+                <button onClick={() => setShowDigestModal(false)} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
+              </div>
+              {digestEmail && localStorage.getItem('digestEmail') === digestEmail && (
+                <p style={{ marginTop: 12, fontSize: '0.75rem', color: '#10b981', textAlign: 'center', fontWeight: 600 }}>✓ Currently subscribed as {digestEmail}</p>
+              )}
             </div>
           </div>
         )}
