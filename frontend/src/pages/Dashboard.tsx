@@ -87,9 +87,25 @@ const Dashboard: React.FC = () => {
   const [feedbackPredicted, setFeedbackPredicted] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses' | 'report'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses' | 'report' | 'budgets'>('overview');
   const [username, setUsername] = useState('');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
+
+  // Budget caps state
+  const [budgets, setBudgets] = useState<Record<string,number>>(() => {
+    try { return JSON.parse(localStorage.getItem('budgets') || '{}'); } catch { return {}; }
+  });
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [budgetCategory, setBudgetCategory] = useState('Food');
+  const [budgetAmount, setBudgetAmount] = useState('');
+
+  // Recurring detection state
+  const [recurringMap, setRecurringMap] = useState<Record<string,boolean>>({});
+
+  // Natural language input state
+  const [nlInput, setNlInput] = useState('');
+  const [nlParsing, setNlParsing] = useState(false);
+  const [nlMode, setNlMode] = useState(false);
 
   // Report state
   const [reportLoading, setReportLoading] = useState(false);
@@ -126,13 +142,34 @@ const Dashboard: React.FC = () => {
   }, [darkMode]);
 
   useEffect(() => {
+    localStorage.setItem('budgets', JSON.stringify(budgets));
+  }, [budgets]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
+
+  const detectRecurring = (exps: Expense[]) => {
+    // Group by normalised description, count distinct months
+    const descMonths: Record<string, Set<string>> = {};
+    exps.forEach(e => {
+      const key = e.description.toLowerCase().trim();
+      const month = new Date(e.date).toISOString().slice(0, 7);
+      if (!descMonths[key]) descMonths[key] = new Set();
+      descMonths[key].add(month);
+    });
+    const map: Record<string, boolean> = {};
+    Object.entries(descMonths).forEach(([key, months]) => {
+      if (months.size >= 2) map[key] = true;
+    });
+    setRecurringMap(map);
+  };
 
   const fetchExpenses = async () => {
     try {
       const res = await api.get('/expenses');
       setExpenses(res.data || []);
+      detectRecurring(res.data || []);
     } catch (err: any) {
       if (err?.response?.status === 401 || err?.response?.status === 422) {
         localStorage.removeItem('token');
@@ -262,8 +299,24 @@ const Dashboard: React.FC = () => {
       setDescription('');
       setSuggestedCategory('');
       setConfidence(0);
-      fetchExpenses();
-      showToast('Expense added!', 'success');
+      const updatedRes = await api.get('/expenses');
+      const updatedExps = updatedRes.data || [];
+      setExpenses(updatedExps);
+      detectRecurring(updatedExps);
+      // Check budget cap for this category
+      const catBudget = budgets[category];
+      if (catBudget) {
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const catSpent = updatedExps
+          .filter((e: Expense) => e.category === category && e.date.startsWith(currentMonth))
+          .reduce((sum: number, e: Expense) => sum + e.amount, 0);
+        const pct = (catSpent / catBudget) * 100;
+        if (pct >= 100) showToast(`🚨 ${category} budget exceeded! ($${catSpent.toFixed(0)}/$${catBudget})`, 'error');
+        else if (pct >= 80) showToast(`⚠️ ${category} at ${Math.round(pct)}% of budget`, 'error');
+        else showToast('Expense added!', 'success');
+      } else {
+        showToast('Expense added!', 'success');
+      }
     } catch {
       showToast('Failed to add expense', 'error');
     }
@@ -277,6 +330,40 @@ const Dashboard: React.FC = () => {
       showToast('Expense deleted', 'success');
     } catch {
       showToast('Failed to delete expense', 'error');
+    }
+  };
+
+  // Budget cap handlers
+  const saveBudget = () => {
+    if (!budgetAmount || parseFloat(budgetAmount) <= 0) return;
+    setBudgets(prev => ({ ...prev, [budgetCategory]: parseFloat(budgetAmount) }));
+    setBudgetAmount('');
+    setShowBudgetModal(false);
+    showToast(`Budget set: ${budgetCategory} → $${parseFloat(budgetAmount).toFixed(0)}/mo`, 'success');
+  };
+
+  const removeBudget = (cat: string) => {
+    setBudgets(prev => { const n = { ...prev }; delete n[cat]; return n; });
+    showToast(`Budget removed for ${cat}`, 'success');
+  };
+
+  // Natural language expense parser
+  const handleNLSubmit = async () => {
+    if (!nlInput.trim() || nlParsing) return;
+    setNlParsing(true);
+    try {
+      const res = await api.post('/parse-expense', { text: nlInput });
+      const { amount: a, description: d, category: c } = res.data;
+      setAmount(String(a));
+      setDescription(d);
+      setCategory(c);
+      setNlInput('');
+      setNlMode(false);
+      showToast(`Parsed: ${d} · $${a} · ${c}`, 'success');
+    } catch (err: any) {
+      showToast(err?.response?.data?.msg || 'Could not parse. Try: "Coffee $4.50"', 'error');
+    } finally {
+      setNlParsing(false);
     }
   };
 
@@ -764,9 +851,9 @@ const Dashboard: React.FC = () => {
 
           {/* ── TAB BAR ── */}
           <div className="tab-bar">
-            {(['overview','monthly','expenses','report'] as const).map(t => (
+            {(['overview','monthly','expenses','report','budgets'] as const).map(t => (
               <button key={t} className={`tab-btn ${activeTab === t ? 'on' : ''}`} onClick={() => setActiveTab(t)}>
-                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : t === 'expenses' ? '📋 All Expenses' : '📄 AI Report'}
+                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : t === 'expenses' ? '📋 All Expenses' : t === 'report' ? '📄 AI Report' : '🎯 Budgets'}
               </button>
             ))}
           </div>
@@ -817,7 +904,12 @@ const Dashboard: React.FC = () => {
                               {exp.category[0]}
                             </div>
                             <div>
-                              <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)' }}>{exp.description}</p>
+                              <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              {exp.description}
+                              {recurringMap[exp.description.toLowerCase().trim()] && (
+                                <span title="Recurring expense" style={{ fontSize: '0.65rem', background: '#eef2ff', color: '#6366f1', border: '1px solid #c7d2fe', borderRadius: 20, padding: '1px 7px', fontWeight: 700 }}>🔁 recurring</span>
+                              )}
+                            </p>
                               <p style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 1 }}>{new Date(exp.date).toLocaleDateString()}</p>
                             </div>
                           </div>
@@ -988,9 +1080,142 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
+
+          {/* ── BUDGETS TAB ── */}
+          {activeTab === 'budgets' && (
+            <div style={{ marginBottom: 20 }}>
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
+                  <div className="card-title" style={{ margin: 0 }}>Monthly Budget Caps</div>
+                  <button className="btn-primary" onClick={() => setShowBudgetModal(true)} style={{ fontSize: '0.82rem', padding: '8px 18px' }}>
+                    + Set Budget
+                  </button>
+                </div>
+
+                {Object.keys(budgets).length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '44px 0' }}>
+                    <div style={{ fontSize: '3rem', marginBottom: 12 }}>🎯</div>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 6 }}>No budgets set yet</p>
+                    <p style={{ color: 'var(--text-faint)', fontSize: '0.8rem' }}>Set a monthly cap per category to track your limits</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                    {CATEGORIES.filter(cat => budgets[cat]).map(cat => {
+                      const col = CATEGORY_COLORS[cat] || '#6b7280';
+                      const limit = budgets[cat];
+                      const currentMonth = new Date().toISOString().slice(0, 7);
+                      const spent = expenses
+                        .filter(e => e.category === cat && e.date.startsWith(currentMonth))
+                        .reduce((s, e) => s + e.amount, 0);
+                      const pct = Math.min((spent / limit) * 100, 100);
+                      const over = spent > limit;
+                      const warn = !over && pct >= 80;
+                      const statusColor = over ? '#ef4444' : warn ? '#f59e0b' : '#10b981';
+                      return (
+                        <div key={cat} style={{ padding: '16px 18px', background: 'var(--bg-input)', borderRadius: 14, border: `1.5px solid ${over ? '#fecaca' : warn ? '#fde68a' : 'var(--border)'}` }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                              <div style={{ width: 10, height: 10, borderRadius: '50%', background: col, flexShrink: 0 }} />
+                              <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text)' }}>{cat}</span>
+                              {over && <span style={{ fontSize: '0.65rem', background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: 20, padding: '2px 8px', fontWeight: 700 }}>OVER BUDGET</span>}
+                              {warn && <span style={{ fontSize: '0.65rem', background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', borderRadius: 20, padding: '2px 8px', fontWeight: 700 }}>NEAR LIMIT</span>}
+                            </div>
+                            <button onClick={() => removeBudget(cat)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: '0.75rem', padding: '2px 6px', borderRadius: 6, fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                              onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                              onMouseLeave={e => e.currentTarget.style.color = ''}>
+                              Remove
+                            </button>
+                          </div>
+
+                          <div style={{ height: 8, background: 'var(--bg-month-bar)', borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+                            <div style={{ height: '100%', width: `${pct}%`, background: statusColor, borderRadius: 6, transition: 'width 0.9s cubic-bezier(0.4,0,0.2,1)' }} />
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                            <span style={{ color: statusColor, fontWeight: 600 }}>${spent.toFixed(2)} spent</span>
+                            <span style={{ color: 'var(--text-faint)' }}>
+                              {over
+                                ? <span style={{ color: '#ef4444' }}>Over by ${(spent - limit).toFixed(2)}</span>
+                                : <span>${(limit - spent).toFixed(2)} remaining of ${limit}</span>
+                              }
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Recurring Summary Card */}
+              {Object.keys(recurringMap).length > 0 && (
+                <div className="card" style={{ marginTop: 18 }}>
+                  <div className="card-title">🔁 Recurring Expenses Detected</div>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+                    These appear across multiple months — review whether each is still needed.
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {Object.keys(recurringMap).map(desc => {
+                      const matches = expenses.filter(e => e.description.toLowerCase().trim() === desc);
+                      const avgAmount = matches.reduce((s, e) => s + e.amount, 0) / matches.length;
+                      const cat = matches[0]?.category || 'Other';
+                      const col = CATEGORY_COLORS[cat] || '#6b7280';
+                      return (
+                        <div key={desc} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'var(--bg-input)', borderRadius: 11, border: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: '0.9rem' }}>🔁</span>
+                            <div>
+                              <p style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text)', textTransform: 'capitalize' }}>{desc}</p>
+                              <p style={{ fontSize: '0.72rem', color: 'var(--text-faint)', marginTop: 1 }}>{matches.length}× · avg ${avgAmount.toFixed(2)}/mo</p>
+                            </div>
+                          </div>
+                          <span className="cat-badge" style={{ background: `${col}18`, color: col, border: `1px solid ${col}30`, fontSize: '0.7rem' }}>{cat}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── ADD EXPENSE (always visible) ── */}
           <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-title">Add Expense</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <div className="card-title" style={{ margin: 0 }}>Add Expense</div>
+              <button
+                type="button"
+                onClick={() => { setNlMode(m => !m); setNlInput(''); }}
+                style={{ fontSize: '0.78rem', fontWeight: 600, padding: '6px 14px', borderRadius: 10, border: '1.5px solid #c7d2fe', background: nlMode ? '#6366f1' : 'transparent', color: nlMode ? '#fff' : '#6366f1', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', transition: 'all 0.18s' }}
+              >
+                {nlMode ? '✕ Cancel' : '✨ Quick Add'}
+              </button>
+            </div>
+
+            {/* Natural Language Input */}
+            {nlMode && (
+              <div style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', background: 'var(--bg-input)', border: '1.5px solid #c7d2fe', borderRadius: 14, padding: '10px 14px' }}>
+                <span style={{ fontSize: '1.2rem', flexShrink: 0 }}>✨</span>
+                <input
+                  type="text"
+                  value={nlInput}
+                  onChange={e => setNlInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleNLSubmit()}
+                  placeholder='Try: "Coffee at Starbucks $4.50" or "Uber to airport $28"'
+                  className="inp"
+                  style={{ border: 'none', background: 'transparent', padding: '4px 0', flex: 1, fontSize: '0.88rem' }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleNLSubmit}
+                  disabled={nlParsing || !nlInput.trim()}
+                  style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', border: 'none', borderRadius: 10, padding: '8px 18px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', opacity: nlParsing || !nlInput.trim() ? 0.5 : 1, whiteSpace: 'nowrap', fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                >
+                  {nlParsing ? '...' : 'Parse →'}
+                </button>
+              </div>
+            )}
             {error && <p style={{ color: '#ef4444', marginBottom: 12, fontSize: '0.875rem' }}>{error}</p>}
             <form onSubmit={handleAddExpense}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px,1fr))', gap: 12, alignItems: 'start' }}>
@@ -1093,7 +1318,14 @@ const Dashboard: React.FC = () => {
                         return (
                           <tr key={exp.id}>
                             <td style={{ color: 'var(--text3)', fontSize: '0.84rem' }}>{new Date(exp.date).toLocaleDateString()}</td>
-                            <td style={{ color: 'var(--text)', fontWeight: 500 }}>{exp.description}</td>
+                            <td style={{ color: 'var(--text)', fontWeight: 500 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {exp.description}
+                                {recurringMap[exp.description.toLowerCase().trim()] && (
+                                  <span style={{ fontSize: '0.62rem', background: '#eef2ff', color: '#6366f1', border: '1px solid #c7d2fe', borderRadius: 20, padding: '1px 6px', fontWeight: 700 }}>🔁</span>
+                                )}
+                              </span>
+                            </td>
                             <td>
                               <span className="cat-badge" style={{ background: `${col}15`, color: col, border: `1px solid ${col}30` }}>
                                 {exp.category}
@@ -1119,6 +1351,38 @@ const Dashboard: React.FC = () => {
           )}
 
         </div>
+
+
+        {/* ── BUDGET MODAL ── */}
+        {showBudgetModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18, padding: '24px', maxWidth: 400, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+              <h3 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: 'var(--text)', marginBottom: 18 }}>🎯 Set Monthly Budget Cap</h3>
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Category</label>
+                <select value={budgetCategory} onChange={e => setBudgetCategory(e.target.value)} className="sel">
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 22 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Monthly Limit ($)</label>
+                <input
+                  type="number" step="0.01" placeholder="e.g. 300"
+                  value={budgetAmount} onChange={e => setBudgetAmount(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && saveBudget()}
+                  className="inp" autoFocus
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={saveBudget} className="btn-primary" style={{ flex: 1 }}>Save Budget</button>
+                <button onClick={() => { setShowBudgetModal(false); setBudgetAmount(''); }} style={{ flex: 1, padding: '13px', borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── FEEDBACK MODAL ── */}
         {showFeedbackModal && feedbackPredicted && (

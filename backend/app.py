@@ -6,38 +6,26 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
+import json
+import anthropic
 
 # ====================== HYBRID ML + KEYWORD BOOST ======================
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.naive_bayes import MultinomialNB
 import pickle
-import anthropic
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILE = os.path.join(BASE_DIR, 'category_model.pkl')
 
-# Strong keyword mapping (high confidence)
 keyword_map = {
-    "pizza": "Food",
-    "starbucks": "Food",
-    "coffee": "Food",
-    "uber": "Transport",
-    "lyft": "Transport",
-    "bus": "Transport",
-    "taxi": "Transport",
-    "netflix": "Entertainment",
-    "spotify": "Entertainment",
-    "hulu": "Entertainment",
-    "amazon": "Shopping",
-    "target": "Shopping",
-    "walmart": "Shopping",
-    "rent": "Bills",
-    "electricity": "Bills",
-    "internet": "Bills",
+    "pizza": "Food", "starbucks": "Food", "coffee": "Food",
+    "uber": "Transport", "lyft": "Transport", "bus": "Transport", "taxi": "Transport",
+    "netflix": "Entertainment", "spotify": "Entertainment", "hulu": "Entertainment",
+    "amazon": "Shopping", "target": "Shopping", "walmart": "Shopping",
+    "rent": "Bills", "electricity": "Bills", "internet": "Bills",
     "gift": "Gift Cards"
 }
 
-# Training data for ML fallback
 training_descriptions = [
     "starbucks coffee", "morning coffee", "lunch", "dinner", "groceries", "pizza delivery",
     "uber ride", "lyft", "bus ticket", "gas", "fuel",
@@ -55,7 +43,6 @@ training_categories = [
     "Gift Cards", "Gift Cards"
 ]
 
-# Load or train model
 if os.path.exists(MODEL_FILE):
     with open(MODEL_FILE, 'rb') as f:
         vectorizer, model = pickle.load(f)
@@ -73,7 +60,6 @@ else:
 load_dotenv()
 
 app = Flask(__name__)
-
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') or 'super-secret-key-change-me-in-production'
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY') or 'jwt-secret-key-change-me'
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL') or 'postgresql:///finance_db'
@@ -92,7 +78,6 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
     expenses = db.relationship('Expense', backref='user', lazy=True)
 
 class Expense(db.Model):
@@ -120,13 +105,10 @@ def register():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('email') or not data.get('password'):
         return jsonify({'msg': 'Missing fields'}), 400
-
     if User.query.filter_by(username=data['username']).first():
         return jsonify({'msg': 'Username already exists'}), 400
-
     if User.query.filter_by(email=data['email']).first():
         return jsonify({'msg': 'Email already exists'}), 400
-
     hashed_pw = generate_password_hash(data['password'])
     new_user = User(username=data['username'], email=data['email'], password_hash=hashed_pw)
     db.session.add(new_user)
@@ -137,10 +119,8 @@ def register():
 def login():
     data = request.get_json()
     user = User.query.filter_by(username=data.get('username')).first()
-
     if not user or not check_password_hash(user.password_hash, data.get('password')):
         return jsonify({'msg': 'Bad credentials'}), 401
-
     access_token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=7))
     return jsonify(access_token=access_token), 200
 
@@ -150,11 +130,8 @@ def get_expenses():
     user_id = int(get_jwt_identity())
     expenses = Expense.query.filter_by(user_id=user_id).all()
     return jsonify([{
-        'id': e.id,
-        'amount': e.amount,
-        'description': e.description,
-        'category': e.category,
-        'date': e.date.isoformat()
+        'id': e.id, 'amount': e.amount, 'description': e.description,
+        'category': e.category, 'date': e.date.isoformat()
     } for e in expenses]), 200
 
 @app.route('/expenses', methods=['POST'])
@@ -162,15 +139,11 @@ def get_expenses():
 def add_expense():
     user_id = int(get_jwt_identity())
     data = request.get_json()
-
     if not data or not data.get('amount'):
         return jsonify({'msg': 'Amount required'}), 400
-
     new_exp = Expense(
-        amount=data['amount'],
-        description=data.get('description'),
-        category=data.get('category', 'Other'),
-        user_id=user_id
+        amount=data['amount'], description=data.get('description'),
+        category=data.get('category', 'Other'), user_id=user_id
     )
     db.session.add(new_exp)
     db.session.commit()
@@ -194,27 +167,17 @@ def predict_category():
         data = request.get_json()
         if not data:
             return jsonify({'category': 'Other', 'confidence': 0.0}), 200
-
         description = data.get('description', '').strip().lower()
-
         if not description:
             return jsonify({'category': 'Other', 'confidence': 0.0}), 200
-
-        # 1. Strong keyword matching (high confidence)
         for keyword, cat in keyword_map.items():
             if keyword in description:
                 return jsonify({'category': cat, 'confidence': 0.95}), 200
-
-        # 2. Fall back to ML model
         X_new = vectorizer.transform([description])
         predicted = model.predict(X_new)[0]
         proba = model.predict_proba(X_new)[0]
         confidence = float(max(proba))
-
-        return jsonify({
-            'category': predicted,
-            'confidence': round(confidence, 4)
-        }), 200
+        return jsonify({'category': predicted, 'confidence': round(confidence, 4)}), 200
     except Exception as e:
         print(f"Predict error: {e}")
         return jsonify({'category': 'Other', 'confidence': 0.0, 'error': str(e)}), 200
@@ -226,15 +189,11 @@ def save_feedback():
     try:
         user_id = int(get_jwt_identity())
         data = request.get_json()
-
         if not data or not data.get('description') or not data.get('predicted') or not data.get('actual'):
             return jsonify({'msg': 'Missing required fields'}), 400
-
         feedback = Feedback(
-            description=data.get('description'),
-            predicted=data.get('predicted'),
-            actual=data.get('actual'),
-            user_id=user_id
+            description=data.get('description'), predicted=data.get('predicted'),
+            actual=data.get('actual'), user_id=user_id
         )
         db.session.add(feedback)
         db.session.commit()
@@ -244,7 +203,6 @@ def save_feedback():
         print(f"Feedback error: {str(e)}")
         return jsonify({'msg': 'Server error'}), 500
 
-
 # ====================== CHAT ENDPOINT ======================
 @app.route('/chat', methods=['POST'])
 @jwt_required()
@@ -253,31 +211,87 @@ def chat():
         data = request.get_json()
         if not data or not data.get('messages'):
             return jsonify({'msg': 'Missing messages'}), 400
-
         messages = data.get('messages', [])
-        context  = data.get('context', '')
-
+        context = data.get('context', '')
         client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-
         response = client.messages.create(
             model='claude-opus-4-5',
             max_tokens=1024,
-            system=f"You are a helpful personal finance assistant embedded in a finance tracking app. "
-                   f"Be concise, friendly, and give practical actionable advice. "
-                   f"User spending context: {context} "
-                   f"Keep responses under 120 words unless detail is genuinely needed.",
+            system=(
+                f"You are a helpful personal finance assistant embedded in a finance tracking app. "
+                f"Be concise, friendly, and give practical actionable advice. "
+                f"User spending context: {context} "
+                f"Keep responses under 120 words unless detail is genuinely needed."
+            ),
             messages=messages
         )
-
         reply = response.content[0].text if response.content else "Sorry, I couldn't respond right now."
         return jsonify({'reply': reply}), 200
-
     except anthropic.AuthenticationError:
         return jsonify({'msg': 'API key missing or invalid. Set ANTHROPIC_API_KEY in your .env file.'}), 500
     except Exception as e:
         print(f"Chat error: {str(e)}")
         return jsonify({'msg': f'Chat error: {str(e)}'}), 500
 
+# ====================== PARSE EXPENSE ENDPOINT ======================
+@app.route('/parse-expense', methods=['POST'])
+@jwt_required()
+def parse_expense():
+    try:
+        data = request.get_json()
+        text = (data.get('text') or '').strip()
+        if not text:
+            return jsonify({'msg': 'No text provided'}), 400
+
+        client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+        prompt = (
+            f'Extract expense details from this natural language input: "{text}"\n\n'
+            'Return ONLY a JSON object with exactly these three fields, no markdown, no explanation:\n'
+            '{"amount": <number>, "description": "<concise name>", "category": "<one of: Food, Transport, Shopping, Entertainment, Bills, Gift Cards, Other>"}\n\n'
+            'Rules:\n'
+            '- amount must be a positive number extracted from the text\n'
+            '- description should be short and clean, e.g. "Starbucks coffee"\n'
+            '- category must be exactly one of the listed values\n'
+            '- If no amount is found, set amount to 0'
+        )
+
+        response = client.messages.create(
+            model='claude-opus-4-5',
+            max_tokens=200,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+
+        raw = response.content[0].text.strip()
+        # Strip markdown fences if present
+        if '```' in raw:
+            raw = raw.split('```')[1]
+            if raw.startswith('json'):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        parsed = json.loads(raw)
+        amount = float(parsed.get('amount', 0))
+
+        if amount <= 0:
+            return jsonify({'msg': 'Could not detect an amount. Try: "Coffee $4.50"'}), 400
+
+        valid_cats = ['Food', 'Transport', 'Shopping', 'Entertainment', 'Bills', 'Gift Cards', 'Other']
+        cat = parsed.get('category', 'Other')
+        return jsonify({
+            'amount': round(amount, 2),
+            'description': str(parsed.get('description', text))[:255],
+            'category': cat if cat in valid_cats else 'Other'
+        }), 200
+
+    except anthropic.AuthenticationError:
+        return jsonify({'msg': 'API key missing or invalid.'}), 500
+    except json.JSONDecodeError as e:
+        print(f"Parse JSON error: {str(e)}, raw response: {raw if 'raw' in dir() else 'N/A'}")
+        return jsonify({'msg': f'JSON parse error: {str(e)}'}), 400
+    except Exception as e:
+        print(f"Parse expense error: {type(e).__name__}: {str(e)}")
+        return jsonify({'msg': f'Parse error: {type(e).__name__}: {str(e)}'}), 400
 
 # ====================== MONTHLY REPORT ENDPOINT ======================
 @app.route('/generate-report', methods=['POST'])
@@ -285,29 +299,21 @@ def chat():
 def generate_report():
     try:
         user_id = int(get_jwt_identity())
-
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return jsonify({'msg': 'User not found'}), 404
 
-        # Pull all expenses for this user
         all_expenses = Expense.query.filter_by(user_id=user_id).all()
         if not all_expenses:
             return jsonify({'msg': 'No expenses found to generate a report'}), 400
 
         now = datetime.utcnow()
-
-        # Filter to current month
-        target_expenses = [
-            e for e in all_expenses
-            if e.date.month == now.month and e.date.year == now.year
-        ]
+        target_expenses = [e for e in all_expenses if e.date.month == now.month and e.date.year == now.year]
         report_label = now.strftime("%B %Y")
 
         if not target_expenses:
             return jsonify({'msg': f'No expenses found for {report_label}'}), 400
 
-        # ── Stats ──────────────────────────────────────
         total = sum(e.amount for e in target_expenses)
 
         category_totals = {}
@@ -315,72 +321,40 @@ def generate_report():
             category_totals[e.category] = category_totals.get(e.category, 0) + e.amount
         top_categories = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
 
-        # Previous month
         if now.month == 1:
             prev_m, prev_y = 12, now.year - 1
         else:
             prev_m, prev_y = now.month - 1, now.year
 
-        prev_expenses = [
-            e for e in all_expenses
-            if e.date.month == prev_m and e.date.year == prev_y
-        ]
+        prev_expenses = [e for e in all_expenses if e.date.month == prev_m and e.date.year == prev_y]
         prev_total = sum(e.amount for e in prev_expenses)
         mom_pct = ((total - prev_total) / prev_total * 100) if prev_total > 0 else None
 
-        # Avg daily spend
         unique_days = len(set(e.date.day for e in target_expenses))
         avg_daily = total / max(unique_days, 1)
-
-        # Top 3 individual expenses
         top_expenses = sorted(target_expenses, key=lambda e: e.amount, reverse=True)[:3]
 
-        # ── Claude prompt ───────────────────────────────
-        cat_breakdown = "\n".join(
-            f"  - {cat}: ${amt:.2f} ({amt / total * 100:.1f}%)"
-            for cat, amt in top_categories
+        cat_lines = "\n".join(f"  - {cat}: ${amt:.2f} ({amt/total*100:.1f}%)" for cat, amt in top_categories)
+        top_lines = "\n".join(f"  - {e.description}: ${e.amount:.2f} ({e.category})" for e in top_expenses)
+        mom_text = f"{mom_pct:+.1f}% vs last month (${prev_total:.2f})" if mom_pct is not None else "No previous month data"
+
+        prompt = (
+            f"You are a personal financial coach. Generate a clear, friendly monthly financial report for {user.username}.\n\n"
+            f"SPENDING DATA FOR {report_label}:\n"
+            f"- Total spent: ${total:.2f}\n"
+            f"- Month-over-month: {mom_text}\n"
+            f"- Average daily spend: ${avg_daily:.2f}\n"
+            f"- Number of transactions: {len(target_expenses)}\n\n"
+            f"Category breakdown:\n{cat_lines}\n\n"
+            f"Top 3 largest expenses:\n{top_lines}\n\n"
+            "Generate a report with EXACTLY these sections:\n\n"
+            "## Executive Summary\n2-3 sentences giving the overall picture.\n\n"
+            "## Category Analysis\nOne sentence per category explaining what the spending suggests.\n\n"
+            "## Key Insights\n3 bullet points of genuine insights.\n\n"
+            "## Recommendations\n3 specific actionable recommendations with estimated monthly savings.\n\n"
+            "## Savings Projection\nShort motivational paragraph with concrete annual savings numbers.\n\n"
+            "Keep the tone warm and coach-like."
         )
-        top_exp_text = "\n".join(
-            f"  - {e.description}: ${e.amount:.2f} ({e.category})"
-            for e in top_expenses
-        )
-        mom_text = (
-            f"{mom_pct:+.1f}% vs last month (${prev_total:.2f})"
-            if mom_pct is not None else "No previous month data available"
-        )
-
-        prompt = f"""You are a personal financial coach. Generate a clear, friendly, and insightful monthly financial report for {user.username}.
-
-SPENDING DATA FOR {report_label}:
-- Total spent: ${total:.2f}
-- Month-over-month: {mom_text}
-- Average daily spend: ${avg_daily:.2f}
-- Number of transactions: {len(target_expenses)}
-
-Category breakdown:
-{cat_breakdown}
-
-Top 3 largest expenses:
-{top_exp_text}
-
-Generate a report with EXACTLY these sections using these exact markdown headers:
-
-## Executive Summary
-2-3 sentences giving the overall picture of this month's spending in plain English.
-
-## Category Analysis
-For each category (highest to lowest), one sentence explaining what the spending suggests.
-
-## Key Insights
-3 bullet points of genuine, non-obvious insights derived from the data.
-
-## Recommendations
-3 specific, actionable recommendations tailored to this person's actual spending. Each should include an estimated monthly saving if followed.
-
-## Savings Projection
-If the user follows all 3 recommendations, what would they save monthly and annually? A short motivational paragraph with concrete numbers.
-
-Keep the tone warm, direct, and coach-like. Do not just restate numbers — focus on meaning and action."""
 
         client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         response = client.messages.create(
@@ -391,20 +365,17 @@ Keep the tone warm, direct, and coach-like. Do not just restate numbers — focu
         narrative = response.content[0].text if response.content else ''
 
         return jsonify({
-            'report_label':    report_label,
-            'username':        user.username,
-            'total':           round(total, 2),
-            'prev_total':      round(prev_total, 2),
-            'mom_pct':         round(mom_pct, 1) if mom_pct is not None else None,
-            'avg_daily':       round(avg_daily, 2),
-            'tx_count':        len(target_expenses),
+            'report_label': report_label,
+            'username': user.username,
+            'total': round(total, 2),
+            'prev_total': round(prev_total, 2),
+            'mom_pct': round(mom_pct, 1) if mom_pct is not None else None,
+            'avg_daily': round(avg_daily, 2),
+            'tx_count': len(target_expenses),
             'category_totals': dict(top_categories),
-            'top_expenses':    [
-                {'description': e.description, 'amount': e.amount, 'category': e.category}
-                for e in top_expenses
-            ],
-            'narrative':       narrative,
-            'generated_at':    now.isoformat(),
+            'top_expenses': [{'description': e.description, 'amount': e.amount, 'category': e.category} for e in top_expenses],
+            'narrative': narrative,
+            'generated_at': now.isoformat(),
         }), 200
 
     except anthropic.AuthenticationError:
