@@ -2,7 +2,7 @@ from flask import request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash #add to pip if not already
 
-import app
+import finance_app
 from models import db, User, Expense, Feedback
 from datetime import timedelta
 
@@ -58,7 +58,7 @@ def get_expenses():
     } for e in expenses]), 200
 
 #Add expense
-@app.route('/expenses', methods=['POST'])
+@finance_app.route('/expenses', methods=['POST'])
 @jwt_required()
 def add_expense():
     user_id = get_jwt_identity()
@@ -92,7 +92,7 @@ def delete_expense(id):
     return jsonify({'msg': 'Expense deleted'}), 200
 
 # Save feedback on AI predictions
-@app.route('/feedback', methods=['POST'])
+@finance_app.route('/feedback', methods=['POST'])
 @jwt_required()
 def save_feedback():
     user_id = get_jwt_identity()

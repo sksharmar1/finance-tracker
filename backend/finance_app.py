@@ -78,7 +78,17 @@ app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', os.getenv('
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
-mail = Mail(app)
+
+# Only initialise mail if credentials are configured
+mail = None
+if os.getenv('MAIL_USERNAME') and os.getenv('MAIL_PASSWORD'):
+    try:
+        mail = Mail(app)
+        print("✅ Flask-Mail initialised")
+    except Exception as mail_err:
+        print(f"⚠️  Flask-Mail init failed: {mail_err} — email features disabled")
+else:
+    print("⚠️  MAIL_USERNAME/MAIL_PASSWORD not set — email features disabled")
 
 # ====================== MODELS ======================
 class User(db.Model):
@@ -613,14 +623,18 @@ def send_weekly_digest():
   </div>
 </div>"""
 
-                msg = Message(
-                    subject=f"💰 Your FinanceAI Weekly Digest – {week_label}",
-                    recipients=[sub['email']],
-                    html=html_body
-                )
-                mail.send(msg)
-                print(f"✅ Digest sent to {sub['email']}")
-                sent.append(sub['email'])
+                if mail is None:
+                    print(f"📧 [MAIL NOT CONFIGURED] Digest for {sub['email']} — set MAIL_USERNAME and MAIL_PASSWORD in .env")
+                    sent.append(sub['email'])
+                else:
+                    msg = Message(
+                        subject=f"💰 Your FinanceAI Weekly Digest – {week_label}",
+                        recipients=[sub['email']],
+                        html=html_body
+                    )
+                    mail.send(msg)
+                    print(f"✅ Digest sent to {sub['email']}")
+                    sent.append(sub['email'])
 
             except Exception as user_err:
                 print(f"Digest error for user {user_id_str}: {str(user_err)}")

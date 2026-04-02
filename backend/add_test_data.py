@@ -5,13 +5,13 @@ Script to add test expenses to the database for demonstration
 import sys
 sys.path.insert(0, '/Users/sksharma/PycharmProjects/finance-tracker/pythonProject')
 
-from app import app, db
+from finance_app import app, db
 from datetime import datetime, timezone, timedelta
 import random
 from werkzeug.security import generate_password_hash
 
-# Import models from app.py
-from app import User, Expense
+# Import models from finance_app.py
+from finance_app import User, Expense
 
 def add_test_data():
     with app.app_context():
