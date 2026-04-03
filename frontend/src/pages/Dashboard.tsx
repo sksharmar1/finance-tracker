@@ -2013,20 +2013,20 @@ const Dashboard: React.FC = () => {
 
         {/* ── TAX EXPORT MODAL ── */}
         {showTaxModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18, padding: 26, maxWidth: 420, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
+            <div style={{ background: '#1e1e2e', border: '1px solid #3f3f5a', borderRadius: 18, padding: 26, maxWidth: 420, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
                 <div style={{ width: 42, height: 42, borderRadius: 12, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>📊</div>
                 <div>
-                  <h3 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: 'var(--text)', margin: 0 }}>Export Tax Report</h3>
-                  <p style={{ fontSize: '0.76rem', color: 'var(--text-faint)', margin: 0, marginTop: 2 }}>Generates a full annual expense report for your accountant</p>
+                  <h3 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: '#1e293b', margin: 0 }}>Export Tax Report</h3>
+                  <p style={{ fontSize: '0.76rem', color: '#475569', margin: 0, marginTop: 2 }}>Generates a full annual expense report for your accountant</p>
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
                 <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Tax Year</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Tax Year</label>
                   <select value={taxYear} onChange={e => setTaxYear(e.target.value)} className="sel">
                     {[0,1,2,3].map(offset => {
                       const y = new Date().getFullYear() - offset;
@@ -2035,26 +2035,26 @@ const Dashboard: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Full Name (optional)</label>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Full Name (optional)</label>
                   <input type="text" placeholder={username} value={taxFullName} onChange={e => setTaxFullName(e.target.value)} className="inp" />
                 </div>
               </div>
 
               {/* Format picker */}
               <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 9 }}>Download Format</label>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 9 }}>Download Format</label>
                 <div style={{ display: 'flex', gap: 10 }}>
                   {([['pdf', '📄 PDF', 'Best for sharing & printing'], ['html', '🌐 HTML', 'Open in any browser']] as const).map(([fmt, label, hint]) => (
                     <button key={fmt} type="button" onClick={() => setTaxFormat(fmt)}
                       style={{ flex: 1, padding: '10px 14px', borderRadius: 12, border: `1.5px solid ${taxFormat === fmt ? '#6366f1' : 'var(--border)'}`, background: taxFormat === fmt ? '#eef2ff' : 'var(--bg-input)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s' }}>
-                      <p style={{ fontWeight: 700, fontSize: '0.84rem', color: taxFormat === fmt ? '#6366f1' : 'var(--text)', margin: '0 0 2px' }}>{label}</p>
-                      <p style={{ fontSize: '0.7rem', color: 'var(--text-faint)', margin: 0 }}>{hint}</p>
+                      <p style={{ fontWeight: 700, fontSize: '0.84rem', color: taxFormat === fmt ? '#6366f1' : '#1e293b', margin: '0 0 2px' }}>{label}</p>
+                      <p style={{ fontSize: '0.7rem', color: '#475569', margin: 0 }}>{hint}</p>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div style={{ background: 'var(--bg-input)', borderRadius: 12, padding: '12px 14px', marginBottom: 20, fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              <div style={{ background: 'var(--bg-input)', borderRadius: 12, padding: '12px 14px', marginBottom: 20, fontSize: '0.78rem', color: '#334155', lineHeight: 1.6 }}>
                 📄 The report includes: cover page, AI executive summary, monthly breakdown table, category summary, and a complete itemised expense ledger — formatted for printing and sharing with your accountant.
               </div>
 
@@ -2062,7 +2062,7 @@ const Dashboard: React.FC = () => {
                 <button onClick={exportTaxReport} disabled={taxExporting} className="btn-primary" style={{ flex: 1, opacity: taxExporting ? 0.6 : 1 }}>
                   {taxExporting ? '⏳ Generating...' : '↓ Download Report'}
                 </button>
-                <button onClick={() => { setShowTaxModal(false); setTaxFullName(''); }} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
+                <button onClick={() => { setShowTaxModal(false); setTaxFullName(''); }} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: '#475569', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
               </div>
             </div>
           </div>
