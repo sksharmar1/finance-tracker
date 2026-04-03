@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 
@@ -17,6 +17,41 @@ interface Goal {
   saved: number;
   deadline: string;
   emoji: string;
+}
+
+interface HouseholdMember {
+  user_id: number;
+  username: string;
+  role: string;
+  joined_at: string;
+}
+
+interface Household {
+  id: number;
+  name: string;
+  invite_code: string;
+  owner_id: number;
+  members: HouseholdMember[];
+}
+
+interface HouseholdExpense {
+  id: number;
+  amount: number;
+  description: string;
+  category: string;
+  date: string;
+  user_id: number;
+  username: string;
+  is_mine: boolean;
+}
+
+interface HouseholdSummary {
+  household_name: string;
+  total: number;
+  member_count: number;
+  fair_share: number;
+  per_member: Record<string, number>;
+  balances: Record<string, number>;
 }
 
 interface ChatMessage {
@@ -95,8 +130,7 @@ const Dashboard: React.FC = () => {
   const [feedbackDescription, setFeedbackDescription] = useState('');
   const [feedbackPredicted, setFeedbackPredicted] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses' | 'report' | 'budgets' | 'goals'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'monthly' | 'expenses' | 'report' | 'budgets' | 'goals' | 'household'>('overview');
   const [username, setUsername] = useState('');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
 
@@ -129,14 +163,28 @@ const Dashboard: React.FC = () => {
   const [goalAddAmount, setGoalAddAmount] = useState('');
   const [goalAddId, setGoalAddId] = useState('');
 
+  // Tax export state
+  const [showTaxModal, setShowTaxModal] = useState(false);
+  const [taxYear, setTaxYear] = useState(new Date().getFullYear().toString());
+  const [taxFullName, setTaxFullName] = useState('');
+  const [taxExporting, setTaxExporting] = useState(false);
+  const [taxFormat, setTaxFormat] = useState<'pdf' | 'html'>('pdf');
+
+  // Household state
+  const [household, setHousehold] = useState<Household | null>(null);
+  const [householdExpenses, setHouseholdExpenses] = useState<HouseholdExpense[]>([]);
+  const [householdSummary, setHouseholdSummary] = useState<HouseholdSummary | null>(null);
+  const [householdLoading, setHouseholdLoading] = useState(false);
+  const [showHouseholdModal, setShowHouseholdModal] = useState(false);
+  const [householdAction, setHouseholdAction] = useState<'create' | 'join'>('create');
+  const [householdName, setHouseholdName] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
+  const [copiedCode, setCopiedCode] = useState(false);
+
   // Receipt scan state
   const [receiptScanning, setReceiptScanning] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
-  // Email digest state
-  const [digestEmail, setDigestEmail] = useState(() => localStorage.getItem('digestEmail') || '');
-  const [digestSaving, setDigestSaving] = useState(false);
-  const [showDigestModal, setShowDigestModal] = useState(false);
 
   // Report state
   const [reportLoading, setReportLoading] = useState(false);
@@ -154,36 +202,6 @@ const Dashboard: React.FC = () => {
 
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Decode username from JWT payload (no extra API call needed)
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) { navigate('/'); return; }
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      // Flask-JWT stores username in 'sub' as user id; fetch profile or use stored name
-      // We store username separately at login time via localStorage
-      const storedName = localStorage.getItem('username');
-      if (storedName) setUsername(storedName);
-    } catch {}
-    fetchExpenses();
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('darkMode', String(darkMode));
-  }, [darkMode]);
-
-  useEffect(() => {
-    localStorage.setItem('savingsGoals', JSON.stringify(goals));
-  }, [goals]);
-
-  useEffect(() => {
-    localStorage.setItem('budgets', JSON.stringify(budgets));
-  }, [budgets]);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
   const detectRecurring = (exps: Expense[]) => {
     // Group by normalised description, count distinct months
     const descMonths: Record<string, Set<string>> = {};
@@ -200,7 +218,7 @@ const Dashboard: React.FC = () => {
     setRecurringMap(map);
   };
 
-  const fetchExpenses = async () => {
+  const fetchExpenses = useCallback(async () => {
     try {
       const res = await api.get('/expenses');
       setExpenses(res.data || []);
@@ -214,7 +232,36 @@ const Dashboard: React.FC = () => {
         console.error(err);
       }
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    // Decode username from JWT payload (no extra API call needed)
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) { navigate('/'); return; }
+      // Username stored at login time via localStorage
+      const storedName = localStorage.getItem('username');
+      if (storedName) setUsername(storedName);
+    } catch {}
+    fetchExpenses();
+    fetchHousehold();
+  }, [fetchExpenses, navigate]);
+
+  useEffect(() => {
+    localStorage.setItem('darkMode', String(darkMode));
+  }, [darkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('savingsGoals', JSON.stringify(goals));
+  }, [goals]);
+
+  useEffect(() => {
+    localStorage.setItem('budgets', JSON.stringify(budgets));
+  }, [budgets]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
@@ -463,19 +510,99 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // ── Email digest handler ────────────────────────
-  const saveDigestEmail = async () => {
-    if (!digestEmail.trim()) return;
-    setDigestSaving(true);
+
+  // ── Household handlers ─────────────────────────
+  const fetchHousehold = async () => {
     try {
-      await api.post('/subscribe-digest', { email: digestEmail });
-      localStorage.setItem('digestEmail', digestEmail);
-      setShowDigestModal(false);
-      showToast('Weekly digest subscribed!', 'success');
+      const res = await api.get('/household');
+      setHousehold(res.data.household);
+      if (res.data.household) {
+        const [expRes, sumRes] = await Promise.all([
+          api.get('/household/expenses'),
+          api.get('/household/summary'),
+        ]);
+        setHouseholdExpenses(expRes.data);
+        setHouseholdSummary(sumRes.data);
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const createHousehold = async () => {
+    if (!householdName.trim()) return;
+    setHouseholdLoading(true);
+    try {
+      await api.post('/household/create', { name: householdName });
+      setHouseholdName('');
+      setShowHouseholdModal(false);
+      await fetchHousehold();
+      showToast('Household created!', 'success');
     } catch (err: any) {
-      showToast(err?.response?.data?.msg || 'Failed to subscribe', 'error');
+      showToast(err?.response?.data?.msg || 'Failed to create household', 'error');
+    } finally { setHouseholdLoading(false); }
+  };
+
+  const joinHousehold = async () => {
+    if (!inviteCode.trim()) return;
+    setHouseholdLoading(true);
+    try {
+      await api.post('/household/join', { invite_code: inviteCode });
+      setInviteCode('');
+      setShowHouseholdModal(false);
+      await fetchHousehold();
+      showToast('Joined household!', 'success');
+    } catch (err: any) {
+      showToast(err?.response?.data?.msg || 'Invalid invite code', 'error');
+    } finally { setHouseholdLoading(false); }
+  };
+
+  const leaveHousehold = async () => {
+    if (!window.confirm('Are you sure you want to leave this household?')) return;
+    try {
+      await api.post('/household/leave');
+      setHousehold(null);
+      setHouseholdExpenses([]);
+      setHouseholdSummary(null);
+      showToast('Left household', 'success');
+    } catch (err: any) {
+      showToast(err?.response?.data?.msg || 'Failed to leave', 'error');
+    }
+  };
+
+  const copyInviteCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
+
+  // ── Tax export handler ────────────────────────
+  const exportTaxReport = async () => {
+    setTaxExporting(true);
+    try {
+      const res = await api.post('/export-tax',
+        { year: parseInt(taxYear), full_name: taxFullName || username, format: taxFormat },
+        { responseType: 'blob' }
+      );
+      const mimeType = taxFormat === 'pdf' ? 'application/pdf' : 'text/html';
+      const ext      = taxFormat === 'pdf' ? 'pdf' : 'html';
+      const url  = URL.createObjectURL(new Blob([res.data], { type: mimeType }));
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `TaxReport_${taxYear}_${username}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowTaxModal(false);
+      showToast(`Tax report downloaded as ${ext.toUpperCase()}!`, 'success');
+    } catch (err: any) {
+      // blob errors need special handling
+      if (err?.response?.data instanceof Blob) {
+        const text = await err.response.data.text();
+        try { showToast(JSON.parse(text).msg || 'Export failed', 'error'); }
+        catch { showToast('Export failed', 'error'); }
+      } else {
+        showToast(err?.response?.data?.msg || 'Export failed', 'error');
+      }
     } finally {
-      setDigestSaving(false);
+      setTaxExporting(false);
     }
   };
 
@@ -552,7 +679,7 @@ const Dashboard: React.FC = () => {
   <div class="narrative">
     ${report.narrative
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^\- (.+)$/gm, '<li>$1</li>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
       .replace(/(<li>.*<\/li>\n?)+/gs, (m: string) => '<ul>' + m + '</ul>')
       .split('\n').map((l: string) => l.trim() && !l.startsWith('<') ? '<p>' + l + '</p>' : l).join('\n')
     }
@@ -893,7 +1020,9 @@ const Dashboard: React.FC = () => {
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <button className="btn-outline" onClick={exportCSV}>↓ Export CSV</button>
-              <button className="btn-outline" onClick={() => setShowDigestModal(true)} title="Weekly email digest">📧</button>
+              <button className="btn-outline" onClick={() => setShowTaxModal(true)} title="Export annual tax report">
+                📊 Tax Report
+              </button>
               <label className="btn-outline" style={{ cursor: receiptScanning ? 'wait' : 'pointer', position: 'relative' }} title="Scan a receipt">
                 {receiptScanning ? '⏳' : '📷'}
                 <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptScan} style={{ display: 'none' }} />
@@ -968,9 +1097,9 @@ const Dashboard: React.FC = () => {
 
           {/* ── TAB BAR ── */}
           <div className="tab-bar">
-            {(['overview','monthly','expenses','report','budgets','goals'] as const).map(t => (
+            {(['overview','monthly','expenses','report','budgets','goals','household'] as const).map(t => (
               <button key={t} className={`tab-btn ${activeTab === t ? 'on' : ''}`} onClick={() => setActiveTab(t)}>
-                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : t === 'expenses' ? '📋 All Expenses' : t === 'report' ? '📄 AI Report' : t === 'budgets' ? '🎯 Budgets' : '🏆 Goals'}
+                {t === 'overview' ? '📊 Overview' : t === 'monthly' ? '📅 Monthly' : t === 'expenses' ? '📋 All Expenses' : t === 'report' ? '📄 AI Report' : t === 'budgets' ? '🎯 Budgets' : t === 'goals' ? '🏆 Goals' : '🏠 Household'}
               </button>
             ))}
           </div>
@@ -1414,6 +1543,166 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
+
+          {/* ── HOUSEHOLD TAB ── */}
+          {activeTab === 'household' && (
+            <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+              {/* ── No household yet ── */}
+              {!household && (
+                <div className="card" style={{ textAlign: 'center', padding: '52px 28px' }}>
+                  <div style={{ fontSize: '3.5rem', marginBottom: 16 }}>🏠</div>
+                  <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.4rem', color: 'var(--text)', marginBottom: 10 }}>Household Mode</h2>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: 400, margin: '0 auto 28px', lineHeight: 1.6 }}>
+                    Share expenses with your partner, family, or housemates. Create a household or join one with an invite code.
+                  </p>
+                  <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <button className="btn-primary" onClick={() => { setHouseholdAction('create'); setShowHouseholdModal(true); }} style={{ padding: '12px 28px' }}>
+                      + Create Household
+                    </button>
+                    <button className="btn-outline" onClick={() => { setHouseholdAction('join'); setShowHouseholdModal(true); }} style={{ padding: '12px 28px' }}>
+                      Join with Code
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Household exists ── */}
+              {household && (
+                <>
+                  {/* Header card */}
+                  <div className="card" style={{ background: 'linear-gradient(135deg,#1a1060,#2d1b8e)', border: 'none', color: '#fff' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
+                      <div>
+                        <p style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.45)', marginBottom: 6 }}>Household</p>
+                        <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.6rem', margin: 0 }}>{household.name}</h2>
+                        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem', marginTop: 4 }}>
+                          {household.members.length} member{household.members.length !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {/* Invite code pill */}
+                        <div style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 10, padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Invite Code</span>
+                          <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1rem', letterSpacing: '0.15em' }}>{household.invite_code}</span>
+                          <button onClick={() => copyInviteCode(household.invite_code)}
+                            style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: '#fff', fontSize: '0.75rem', fontWeight: 600, fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+                            {copiedCode ? '✓ Copied' : 'Copy'}
+                          </button>
+                        </div>
+                        <button onClick={leaveHousehold}
+                          style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 10, padding: '8px 16px', cursor: 'pointer', color: '#fca5a5', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+                          Leave
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Members row */}
+                    <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+                      {household.members.map(m => (
+                        <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: '7px 14px' }}>
+                          <div style={{ width: 28, height: 28, borderRadius: '50%', background: m.role === 'owner' ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
+                            {m.username[0].toUpperCase()}
+                          </div>
+                          <div>
+                            <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 600, color: '#fff' }}>{m.username}</p>
+                            <p style={{ margin: 0, fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', textTransform: 'capitalize' }}>{m.role}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Summary card */}
+                  {householdSummary && (
+                    <div className="card">
+                      <div className="card-title">💰 Spending Split</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 12, marginBottom: 20 }}>
+                        <div style={{ background: 'var(--bg-input)', borderRadius: 12, padding: '14px 16px', textAlign: 'center' }}>
+                          <p style={{ fontSize: '0.7rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Total Household</p>
+                          <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.4rem', color: 'var(--text)' }}>${householdSummary.total.toFixed(2)}</p>
+                        </div>
+                        <div style={{ background: 'var(--bg-input)', borderRadius: 12, padding: '14px 16px', textAlign: 'center' }}>
+                          <p style={{ fontSize: '0.7rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Fair Share Each</p>
+                          <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '1.4rem', color: '#6366f1' }}>${householdSummary.fair_share.toFixed(2)}</p>
+                        </div>
+                      </div>
+
+                      {/* Per-member breakdown */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {Object.entries(householdSummary.per_member).map(([name, spent]) => {
+                          const balance = householdSummary.balances[name];
+                          const owes = balance > 0;
+                          const pct = householdSummary.total > 0 ? Math.round((spent / householdSummary.total) * 100) : 0;
+                          return (
+                            <div key={name}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{ width: 24, height: 24, borderRadius: '50%', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                                    {name[0].toUpperCase()}
+                                  </span>
+                                  {name}
+                                </span>
+                                <div style={{ textAlign: 'right' }}>
+                                  <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: 'var(--text)', fontSize: '0.95rem' }}>${spent.toFixed(2)}</span>
+                                  <span style={{ fontSize: '0.72rem', marginLeft: 8, fontWeight: 600, color: owes ? '#ef4444' : '#10b981' }}>
+                                    {owes ? `owes $${balance.toFixed(2)}` : balance === 0 ? 'even' : `owed $${Math.abs(balance).toFixed(2)}`}
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ height: 5, background: 'var(--bg-month-bar)', borderRadius: 4, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg,#6366f1,#8b5cf6)', borderRadius: 4, transition: 'width 0.9s' }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shared expenses table */}
+                  <div className="card">
+                    <div className="card-title">🧾 Shared Expenses ({householdExpenses.length})</div>
+                    {householdExpenses.length === 0 ? (
+                      <p style={{ color: 'var(--text-faint)', textAlign: 'center', padding: '32px 0', fontSize: '0.875rem' }}>No shared expenses yet</p>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="exp-table">
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Description</th>
+                              <th>Category</th>
+                              <th>By</th>
+                              <th style={{ textAlign: 'right' }}>Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {householdExpenses.map(exp => {
+                              const col = CATEGORY_COLORS[exp.category] || '#6b7280';
+                              return (
+                                <tr key={exp.id}>
+                                  <td style={{ color: 'var(--text-faint)', fontSize: '0.84rem' }}>{new Date(exp.date).toLocaleDateString()}</td>
+                                  <td style={{ color: 'var(--text)', fontWeight: 500 }}>
+                                    {exp.description}
+                                    {exp.is_mine && <span style={{ marginLeft: 6, fontSize: '0.65rem', background: '#eef2ff', color: '#6366f1', border: '1px solid #c7d2fe', borderRadius: 20, padding: '1px 7px', fontWeight: 700 }}>you</span>}
+                                  </td>
+                                  <td><span className="cat-badge" style={{ background: `${col}15`, color: col, border: `1px solid ${col}30` }}>{exp.category}</span></td>
+                                  <td style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>{exp.username}</td>
+                                  <td style={{ textAlign: 'right', fontFamily: 'Outfit, sans-serif', fontWeight: 700, color: 'var(--text)' }}>${exp.amount.toFixed(2)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* ── ADD EXPENSE (always visible) ── */}
           <div className="card" style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
@@ -1451,7 +1740,6 @@ const Dashboard: React.FC = () => {
                 </button>
               </div>
             )}
-            {error && <p style={{ color: '#ef4444', marginBottom: 12, fontSize: '0.875rem' }}>{error}</p>}
             <form onSubmit={handleAddExpense}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px,1fr))', gap: 12, alignItems: 'start' }}>
 
@@ -1535,7 +1823,9 @@ const Dashboard: React.FC = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
                 <div className="card-title" style={{ margin: 0 }}>All Expenses ({expenses.length})</div>
                 <button className="btn-outline" onClick={exportCSV}>↓ Export CSV</button>
-              <button className="btn-outline" onClick={() => setShowDigestModal(true)} title="Weekly email digest">📧</button>
+              <button className="btn-outline" onClick={() => setShowTaxModal(true)} title="Export annual tax report">
+                📊 Tax Report
+              </button>
               <label className="btn-outline" style={{ cursor: receiptScanning ? 'wait' : 'pointer', position: 'relative' }} title="Scan a receipt">
                 {receiptScanning ? '⏳' : '📷'}
                 <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptScan} style={{ display: 'none' }} />
@@ -1670,27 +1960,110 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {/* ── EMAIL DIGEST MODAL ── */}
-        {showDigestModal && (
+
+        {/* ── HOUSEHOLD MODAL ── */}
+        {showHouseholdModal && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18, padding: 24, maxWidth: 400, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
-              <h3 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: 'var(--text)', marginBottom: 8 }}>📧 Weekly Email Digest</h3>
-              <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.6 }}>
-                Every Monday morning you'll receive a summary of last week's spending, your top category, budget status, and one AI tip.
-              </p>
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Your Email</label>
-                <input type="email" placeholder="you@example.com" value={digestEmail} onChange={e => setDigestEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveDigestEmail()} className="inp" autoFocus />
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18, padding: 24, maxWidth: 420, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+
+              {/* Toggle create / join */}
+              <div style={{ display: 'flex', background: 'var(--bg-input)', borderRadius: 12, padding: 4, marginBottom: 22 }}>
+                {(['create','join'] as const).map(a => (
+                  <button key={a} onClick={() => setHouseholdAction(a)}
+                    style={{ flex: 1, padding: '8px', borderRadius: 9, border: 'none', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.84rem', background: householdAction === a ? 'var(--bg-card)' : 'transparent', color: householdAction === a ? 'var(--text)' : 'var(--text-muted)', boxShadow: householdAction === a ? '0 2px 8px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.18s' }}>
+                    {a === 'create' ? '+ Create Household' : 'Join with Code'}
+                  </button>
+                ))}
               </div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={saveDigestEmail} disabled={digestSaving || !digestEmail.trim()} className="btn-primary" style={{ flex: 1, opacity: digestSaving ? 0.6 : 1 }}>
-                  {digestSaving ? 'Saving...' : '✓ Subscribe'}
-                </button>
-                <button onClick={() => setShowDigestModal(false)} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
-              </div>
-              {digestEmail && localStorage.getItem('digestEmail') === digestEmail && (
-                <p style={{ marginTop: 12, fontSize: '0.75rem', color: '#10b981', textAlign: 'center', fontWeight: 600 }}>✓ Currently subscribed as {digestEmail}</p>
+
+              {householdAction === 'create' ? (
+                <>
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Household Name</label>
+                    <input type="text" placeholder="e.g. The Sharma Family" value={householdName} onChange={e => setHouseholdName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createHousehold()} className="inp" autoFocus />
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-faint)', marginBottom: 18, lineHeight: 1.5 }}>
+                    An 8-character invite code will be generated. Share it with family members so they can join.
+                  </p>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={createHousehold} disabled={householdLoading || !householdName.trim()} className="btn-primary" style={{ flex: 1, opacity: householdLoading ? 0.6 : 1 }}>
+                      {householdLoading ? 'Creating...' : 'Create'}
+                    </button>
+                    <button onClick={() => { setShowHouseholdModal(false); setHouseholdName(''); }} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Invite Code</label>
+                    <input type="text" placeholder="e.g. A3F8B2C1" value={inviteCode} onChange={e => setInviteCode(e.target.value.toUpperCase())} onKeyDown={e => e.key === 'Enter' && joinHousehold()} className="inp" autoFocus maxLength={8} style={{ letterSpacing: '0.15em', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={joinHousehold} disabled={householdLoading || inviteCode.length < 8} className="btn-primary" style={{ flex: 1, opacity: householdLoading ? 0.6 : 1 }}>
+                      {householdLoading ? 'Joining...' : 'Join'}
+                    </button>
+                    <button onClick={() => { setShowHouseholdModal(false); setInviteCode(''); }} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
+                  </div>
+                </>
               )}
+            </div>
+          </div>
+        )}
+
+
+        {/* ── TAX EXPORT MODAL ── */}
+        {showTaxModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 16 }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 18, padding: 26, maxWidth: 420, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                <div style={{ width: 42, height: 42, borderRadius: 12, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>📊</div>
+                <div>
+                  <h3 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1rem', color: 'var(--text)', margin: 0 }}>Export Tax Report</h3>
+                  <p style={{ fontSize: '0.76rem', color: 'var(--text-faint)', margin: 0, marginTop: 2 }}>Generates a full annual expense report for your accountant</p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Tax Year</label>
+                  <select value={taxYear} onChange={e => setTaxYear(e.target.value)} className="sel">
+                    {[0,1,2,3].map(offset => {
+                      const y = new Date().getFullYear() - offset;
+                      return <option key={y} value={y}>{y}</option>;
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 7 }}>Full Name (optional)</label>
+                  <input type="text" placeholder={username} value={taxFullName} onChange={e => setTaxFullName(e.target.value)} className="inp" />
+                </div>
+              </div>
+
+              {/* Format picker */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 9 }}>Download Format</label>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {([['pdf', '📄 PDF', 'Best for sharing & printing'], ['html', '🌐 HTML', 'Open in any browser']] as const).map(([fmt, label, hint]) => (
+                    <button key={fmt} type="button" onClick={() => setTaxFormat(fmt)}
+                      style={{ flex: 1, padding: '10px 14px', borderRadius: 12, border: `1.5px solid ${taxFormat === fmt ? '#6366f1' : 'var(--border)'}`, background: taxFormat === fmt ? '#eef2ff' : 'var(--bg-input)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s' }}>
+                      <p style={{ fontWeight: 700, fontSize: '0.84rem', color: taxFormat === fmt ? '#6366f1' : 'var(--text)', margin: '0 0 2px' }}>{label}</p>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-faint)', margin: 0 }}>{hint}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--bg-input)', borderRadius: 12, padding: '12px 14px', marginBottom: 20, fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                📄 The report includes: cover page, AI executive summary, monthly breakdown table, category summary, and a complete itemised expense ledger — formatted for printing and sharing with your accountant.
+              </div>
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={exportTaxReport} disabled={taxExporting} className="btn-primary" style={{ flex: 1, opacity: taxExporting ? 0.6 : 1 }}>
+                  {taxExporting ? '⏳ Generating...' : '↓ Download Report'}
+                </button>
+                <button onClick={() => { setShowTaxModal(false); setTaxFullName(''); }} style={{ flex: 1, padding: 13, borderRadius: 14, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, fontSize: '0.875rem' }}>Cancel</button>
+              </div>
             </div>
           </div>
         )}
