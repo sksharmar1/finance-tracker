@@ -2,7 +2,7 @@
 
 > An AI-powered personal finance tracker built with React, Flask, PostgreSQL, and the Anthropic Claude API.
 
-![FinanceAI Dashboard](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react) ![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=flat&logo=flask) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat&logo=postgresql) ![Claude](https://img.shields.io/badge/Claude-Anthropic-D97706?style=flat)
+![FinanceAI Dashboard](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react) ![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=flat&logo=flask) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat&logo=postgresql) ![Claude](https://img.shields.io/badge/Claude-Anthropic-D97706?style=flat) ![GROK](https://grok.com)
 
 ---
 
