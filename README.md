@@ -271,6 +271,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgements
 
+- [GROK(https://grok.com) started the whole project workflow
 - [Anthropic](https://anthropic.com) for the Claude API
 - [Flask](https://flask.palletsprojects.com) for the backend framework
 - [Create React App](https://create-react-app.dev) for the frontend scaffold
