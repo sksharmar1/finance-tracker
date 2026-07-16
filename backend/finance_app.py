@@ -77,10 +77,16 @@ app = Flask(__name__)
 
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY') or 'super-secret-key-change-me-in-production'
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY') or 'jwt-secret-key-change-me'
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL') or 'postgresql:///finance_db'
+_db_url = os.getenv('DATABASE_URL') or 'postgresql:///finance_db'
+if _db_url.startswith('postgres://'):  # Heroku/legacy scheme -> SQLAlchemy 2.x
+    _db_url = _db_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = _db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"], supports_credentials=True)
+_cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+if os.getenv('FRONTEND_URL'):
+    _cors_origins.append(os.getenv('FRONTEND_URL'))
+CORS(app, origins=_cors_origins, supports_credentials=True)
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)

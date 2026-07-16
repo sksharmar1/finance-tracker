@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
+import api from '../utils/api';
 
 const Register: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -18,7 +18,7 @@ const Register: React.FC = () => {
     setLoading(true);
 
     try {
-      await axios.post('http://127.0.0.1:5000/register', {
+      await api.post('/register', {
         username,
         email,
         password,

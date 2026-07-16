@@ -52,3 +52,4 @@ weasyprint==68.1
 webencodings==0.5.1
 Werkzeug==3.1.7
 zopfli==0.4.1
+gunicorn==23.0.0
